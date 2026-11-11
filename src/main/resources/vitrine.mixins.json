@@ -1,0 +1,7 @@
+{
+	"required": true,
+	"package": "dev.holoweb.vitrine.impl.mixin",
+	"compatibilityLevel": "JAVA_${java}",
+	"client": ["MinecraftMixin", "MouseHandlerMixin", "KeyboardHandlerMixin"${extra_mixins}],
+	"injectors": { "defaultRequire": 1 }
+}

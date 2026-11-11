@@ -1,0 +1,13 @@
+{
+  "vitrine.keyboard_captured": "Teclado no painel",
+  "vitrine.keyboard_release": "Esc para devolver",
+  "key.vitrine.demo": "Vitrine: tela de demo",
+  "key.vitrine.demo_world": "Vitrine: painel de demo",
+  "vitrine.setup.downloading": "Baixando a engine",
+  "vitrine.setup.installing": "Instalando a engine",
+  "vitrine.setup.installing.detail": "Vitrine · só na primeira vez",
+  "vitrine.setup.ready": "Engine pronta",
+  "vitrine.setup.ready.detail": "Vitrine · as páginas já funcionam",
+  "vitrine.setup.failed": "Engine indisponível",
+  "vitrine.setup.failed.detail": "Vitrine · detalhes no log do jogo"
+}

@@ -1,0 +1,16 @@
+{
+	"schemaVersion": 1,
+	"id": "hello_vitrine",
+	"version": "1.0.0",
+	"name": "Hello Vitrine",
+	"description": "Example of a mod using the Vitrine API.",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["dev.holoweb.hello.HelloVitrine"]
+	},
+	"depends": {
+		"minecraft": "~26.3",
+		"fabric-api": "*",
+		"vitrine": ">=0.1.0"
+	}
+}

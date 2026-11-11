@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; font: 16px system-ui, sans-serif; color: #eef; }
+  .card { background: rgba(16, 22, 40, .82); border: 1px solid rgba(255,255,255,.15); border-radius: 10px; }
+  #hud { position: fixed; top: 16px; right: 16px; padding: 10px 16px; font-size: 22px; }
+  #panel { position: fixed; inset: 0; margin: auto; width: 760px; height: 660px; padding: 20px 28px;
+           display: none; grid-template-columns: 1fr 1fr; gap: 16px 24px; box-sizing: border-box; }
+  body.focused #panel { display: grid; }
+  body.focused { background: rgba(0, 0, 0, .35); }
+  h2 { grid-column: 1 / -1; margin: 0; }
+  label { display: block; font-size: 13px; opacity: .7; margin-bottom: 4px; }
+  input, textarea, select { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; border-radius: 6px;
+           border: 1px solid #556; background: #0b1020; color: #fff; }
+  textarea { height: 90px; resize: vertical; }
+  button { font: inherit; padding: 8px 16px; border-radius: 6px; border: 0; background: #f59e0b; color: #111; cursor: pointer; }
+  button:hover { background: #fbbf24; }
+  a { color: #7dd3fc; }
+  #list { height: 120px; overflow: auto; border: 1px solid #556; border-radius: 6px; padding: 4px 8px; }
+  #keys { font: 13px ui-monospace, monospace; height: 120px; overflow: hidden; white-space: pre; opacity: .85; }
+  .bridge { grid-column: 1 / -1; }
+  .bridge code { display: block; margin-top: 8px; font-size: 13px; opacity: .85; min-height: 1.2em; }
+  .hint { grid-column: 1 / -1; font-size: 13px; opacity: .6; }
+  /* ?world: the page is a panel in the world, always showing the full panel. */
+  body.world { background: #10162a; }
+  body.world #panel { display: grid; width: auto; height: auto; margin: 0; border: 0; border-radius: 0; font-size: 20px; }
+  body.world #closeBtn { display: none; }
+</style>
+</head>
+<body>
+  <div id="hud" class="card">🕒 <span id="clock"></span><div id="pos" style="font-size:15px;opacity:.8"></div></div>
+
+  <div id="panel" class="card">
+    <h2>Vitrine · demo</h2>
+    <div>
+      <label>Texto (acentos: ã é ç; IME)</label>
+      <input id="txt" placeholder="Digite aqui…" autofocus>
+    </div>
+    <div>
+      <label>Seleção e checkbox</label>
+      <select><option>Opção A</option><option>Opção B</option><option>Opção C</option></select>
+      <label style="margin-top:8px"><input type="checkbox" style="width:auto"> marcar</label>
+    </div>
+    <div>
+      <label>Textarea (Enter, Tab, Ctrl+A/C/V, arrastar para selecionar)</label>
+      <textarea>Linha 1&#10;Linha 2</textarea>
+    </div>
+    <div>
+      <label>Rolagem (roda do mouse)</label>
+      <div id="list"></div>
+    </div>
+    <div>
+      <label>Cursores</label>
+      <button id="btn">Botão (mão)</button> <a href="#">link</a>
+      <span style="cursor:move">mover</span> · <span style="cursor:not-allowed">proibido</span>
+      <p id="clicks">cliques: 0</p>
+    </div>
+    <div>
+      <label>Últimas teclas (key / code / keyCode)</label>
+      <div id="keys"></div>
+    </div>
+    <div class="bridge">
+      <label>Ponte JS ↔ Java</label>
+      <input id="msg" value="olá, Java" style="width:200px">
+      <button id="sendBtn">Enviar (echo)</button>
+      <button id="closeBtn">Fechar via Java</button>
+      <button id="billboardBtn">Virar para mim</button>
+      <button id="soundBtn">Tocar som</button>
+      <code id="reply"></code>
+    </div>
+    <div>
+      <label>Segurança (tudo deve ser negado)</label>
+      <button id="secBtn">Testar permissões</button>
+      <input type="file" id="file" style="width:auto;margin-top:6px" title="não deve abrir o seletor do Windows">
+      <pre id="sec" style="margin:6px 0 0;font-size:12px;white-space:pre-wrap"></pre>
+    </div>
+    <div class="hint">Esc devolve o foco ao jogo · F8 abre de novo</div>
+  </div>
+
+<script>
+  const clock = document.getElementById('clock');
+  setInterval(() => clock.textContent = new Date().toLocaleTimeString('pt-BR'), 250);
+
+  // Focus comes from Java (SetFocus) — show the panel only while the page has it.
+  if (location.search.includes('world')) {
+    document.body.classList.add('world');
+    txt.blur(); // undo autofocus: only a click on the field should take the keyboard
+    document.querySelector('.hint').textContent = 'Mire e clique (botão esquerdo) · clique num campo para digitar, Esc devolve o teclado · F9 traz o painel';
+  }
+  // On screen, focus means "open": show the panel and put the caret in the text field.
+  // In the world the panel is always shown, and focusing the field would grab the player's keyboard.
+  addEventListener('focus', () => {
+    document.body.classList.add('focused');
+    if (!document.body.classList.contains('world')) txt.focus();
+  });
+  addEventListener('blur', () => document.body.classList.remove('focused'));
+  if (document.hasFocus()) document.body.classList.add('focused');
+
+  const list = document.getElementById('list');
+  for (let i = 1; i <= 40; i++) list.insertAdjacentHTML('beforeend', `<div>item ${i}</div>`);
+
+  let n = 0;
+  btn.onclick = () => clicks.textContent = `cliques: ${++n}`;
+
+  // Java -> JS: ScreenView.send(json) arrives as a message event.
+  addEventListener('message', e => {
+    if (e.data?.type === 'pos') pos.textContent = `📍 ${e.data.x} ${e.data.y} ${e.data.z}`;
+  });
+
+  // JS -> Java: POST to vitrine://<modid>/<handler>; the Java reply resolves the fetch.
+  const java = (name, data) => fetch(`vitrine://vitrine/${name}`, { method: 'POST', body: JSON.stringify(data ?? {}) })
+    .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t))));
+
+  sendBtn.onclick = async () => {
+    const t0 = performance.now();
+    try {
+      const r = await java('echo', { text: msg.value });
+      reply.textContent = `${JSON.stringify(r)} · ${Math.round(performance.now() - t0)} ms`;
+    } catch (err) {
+      reply.textContent = `erro: ${err.message}`;
+    }
+  };
+  closeBtn.onclick = () => java('close');
+  // Test tone: a looping arpeggio made with WebAudio (no files needed). In the world it should come
+  // from the panel and fade with distance; on screen it plays straight in stereo.
+  let audio = null;
+  soundBtn.onclick = () => {
+    if (audio) { audio.close(); audio = null; soundBtn.textContent = 'Tocar som'; return; }
+    audio = new AudioContext();
+    const notes = [261.6, 329.6, 392.0, 523.3, 392.0, 329.6];
+    let i = 0;
+    const play = () => {
+      if (!audio) return;
+      const t = audio.currentTime, osc = audio.createOscillator(), env = audio.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = notes[i++ % notes.length];
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
+      env.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      osc.connect(env).connect(audio.destination);
+      osc.start(t);
+      osc.stop(t + 0.3);
+      setTimeout(play, 300);
+    };
+    play();
+    soundBtn.textContent = 'Parar som';
+  };
+
+  billboardBtn.onclick = async () => {
+    const r = await java('billboard');
+    billboardBtn.textContent = r.billboard ? 'Fixar rotação' : 'Virar para mim';
+  };
+
+  // Security check: every device/permission request and downloads/popups must be refused by Vitrine.
+  secBtn.onclick = async () => {
+    const out = [];
+    const show = () => sec.textContent = out.join('\n');
+    const tryIt = async (name, fn) => {
+      try { out.push(`${name}: ${await fn()}`); } catch (e) { out.push(`${name}: negado (${e.name || e})`); }
+      show();
+    };
+    await tryIt('microfone', async () => { await navigator.mediaDevices.getUserMedia({ audio: true }); return 'PERMITIDO'; });
+    await tryIt('câmera', async () => { await navigator.mediaDevices.getUserMedia({ video: true }); return 'PERMITIDO'; });
+    await tryIt('localização', () => new Promise((ok, no) =>
+      navigator.geolocation.getCurrentPosition(() => ok('PERMITIDO'), e => no({ name: 'código ' + e.code }), { timeout: 5000 })));
+    await tryIt('notificações', async () => { const r = await Notification.requestPermission(); return r === 'granted' ? 'PERMITIDO' : `negado (${r})`; });
+    await tryIt('ler área de transf.', async () => { await navigator.clipboard.readText(); return 'PERMITIDO'; });
+    await tryIt('popup', async () => window.open('https://example.com') ? 'ABRIU' : 'bloqueado');
+    // Downloads give the page no feedback: if it got through, vitrine-teste.txt would land in Downloads.
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['teste'])); a.download = 'vitrine-teste.txt'; a.click();
+    out.push('download: pedido (não deve aparecer em Downloads)');
+    show();
+  };
+
+  const lines = [];
+  addEventListener('keydown', e => {
+    lines.unshift(`${JSON.stringify(e.key).padEnd(12)} ${e.code.padEnd(14)} ${e.keyCode}`);
+    keys.textContent = lines.slice(0, 7).join('\n');
+  }, true);
+</script>
+</body>
+</html>
