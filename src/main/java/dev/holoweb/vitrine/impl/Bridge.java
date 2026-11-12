@@ -42,14 +42,13 @@ final class Bridge {
 
 	/** Drains every queued request. Called once per frame. */
 	static void drain() {
-		Object[] r;
+		Native.Request r;
 		while ((r = Native.nextRequest()) != null) {
-			long id = (Long) r[0];
 			try {
-				handle(id, (Long) r[1], (String) r[2], (String) r[3], (String) r[4], (byte[]) r[5], (Boolean) r[6]);
+				handle(r.id(), r.view(), r.method(), r.host(), r.path(), r.body(), r.trusted());
 			} catch (Exception e) {
-				VitrineClient.LOG.error("Vitrine: request {} {} failed", r[2], r[4], e);
-				text(id, 500, "internal error");
+				VitrineClient.LOG.error("Vitrine: request {} {} failed", r.method(), r.path(), e);
+				text(r.id(), 500, "internal error");
 			}
 		}
 	}

@@ -73,8 +73,15 @@ public final class Native {
 	/** Posts {@code json} to the page as a {@code message} event; queued until the page has loaded. */
 	public static native void send(long handle, String json);
 
-	/** Next queued vitrine:// request as {id, view handle, method, host, path, body bytes, trusted}, or null. */
-	public static native Object[] nextRequest();
+	/**
+	 * A vitrine:// request from a page. {@code view}: the page's native handle; {@code path}: URL-decoded;
+	 * {@code trusted}: made by a vitrine:// page (bridge access). Built by vitrine.dll: its constructor
+	 * signature is repeated there (nextRequest), keep the two in step.
+	 */
+	public record Request(long id, long view, String method, String host, String path, byte[] body, boolean trusted) {}
+
+	/** Next queued vitrine:// request, or null. */
+	public static native Request nextRequest();
 
 	/** Answers a request from {@link #nextRequest}; ignored if it was cancelled meanwhile. */
 	public static native void respond(long id, int status, String mime, byte[] body);

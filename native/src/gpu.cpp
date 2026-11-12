@@ -205,8 +205,6 @@ bool Init() {
   return ok;
 }
 
-bool Ready() { return g_ready; }
-
 struct Surface::Impl {
   ComPtr<ID3D11Texture2D> target;  // converted frame, R8G8B8A8, view size
   ComPtr<ID3D11RenderTargetView> rtv;
@@ -259,9 +257,11 @@ ComPtr<ID3D11Texture2D> MakeShared(int w, int h, HANDLE* handle) {
 }
 }  // namespace
 
+Surface::Surface() : impl_(new Impl()) {}
+
 Surface::~Surface() {
   std::lock_guard lock(g_mu);
-  if (impl_) CloseRing(*impl_);
+  CloseRing(*impl_);
   delete impl_;
 }
 
@@ -287,7 +287,7 @@ void Surface::Export() {
 
 bool Surface::VkTake(VkFrame* out) {
   std::lock_guard lock(g_mu);
-  if (!impl_ || impl_->closed || impl_->latest < 0) return false;
+  if (impl_->closed || impl_->latest < 0) return false;
   Impl& s = *impl_;
   int k = s.latest;
   s.ring[k].state = Impl::Slot::kInUse;
@@ -298,21 +298,19 @@ bool Surface::VkTake(VkFrame* out) {
 
 void Surface::VkRelease(int slot, int generation) {
   std::lock_guard lock(g_mu);
-  if (!impl_ || impl_->generation != generation || slot < 0 || slot > 2) return;
+  if (impl_->generation != generation || slot < 0 || slot > 2) return;
   if (impl_->ring[slot].state == Impl::Slot::kInUse) impl_->ring[slot].state = Impl::Slot::kFree;
 }
 
-bool Surface::PaintView(HANDLE shared, int width, int height, bool popupShown, const CefRect& popup) {
+bool Surface::PaintView(HANDLE shared, bool popupShown, const CefRect& popup) {
   std::lock_guard lock(g_mu);
-  if (!impl_) impl_ = new Impl();
   Impl& s = *impl_;
   if (s.closed) return true;
   auto src = OpenShared(shared);
   if (!src) return false;
   D3D11_TEXTURE2D_DESC desc;
   src->GetDesc(&desc);  // the frame's real size (it can lag behind a resize)
-  width = static_cast<int>(desc.Width);
-  height = static_cast<int>(desc.Height);
+  int width = static_cast<int>(desc.Width), height = static_cast<int>(desc.Height);
   if (!s.target || s.width != width || s.height != height) {
     s.target = MakeTarget(width, height, &s.rtv);
     if (!s.target) return false;
@@ -332,7 +330,7 @@ bool Surface::PaintView(HANDLE shared, int width, int height, bool popupShown, c
 
 bool Surface::PaintPopup(HANDLE shared, const CefRect& popup) {
   std::lock_guard lock(g_mu);
-  if (!impl_ || !impl_->target || impl_->closed) return true;  // no view yet: nothing to draw over
+  if (!impl_->target || impl_->closed) return true;  // no view yet: nothing to draw over
   Impl& s = *impl_;
   auto src = OpenShared(shared);
   if (!src) return false;
@@ -363,7 +361,7 @@ void Surface::DrawPopup(const CefRect& r) {
 
 bool Surface::CopyTo(unsigned glTexture, int width, int height) {
   std::lock_guard lock(g_mu);
-  if (!impl_ || !impl_->fresh || impl_->closed) return false;
+  if (!impl_->fresh || impl_->closed) return false;
   Impl& s = *impl_;
   if (s.width != width || s.height != height) return false;  // mid-resize: wait for a matching frame
   if (s.glGeneration != s.generation) {  // (re)attach the GL name to the current D3D texture
@@ -381,9 +379,8 @@ bool Surface::CopyTo(unsigned glTexture, int width, int height) {
   return true;
 }
 
-void Surface::ReleaseGl() {
+void Surface::Close() {
   std::lock_guard lock(g_mu);
-  if (!impl_) impl_ = new Impl();
   Impl& s = *impl_;
   s.closed = true;
   if (s.glObj) wglDXUnregisterObject(g_interop, s.glObj);

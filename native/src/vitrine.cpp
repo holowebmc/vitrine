@@ -1,4 +1,4 @@
-// JNI bridge: Java <-> CEF, off-screen rendering into an RGBA buffer Java copies from.
+// JNI bridge: Java <-> CEF, off-screen rendering into frames Java takes (frames.h, gpu.h).
 //
 // Threading: multi_threaded_message_loop (Windows/Linux). CEF runs its own UI thread with its
 // own Win32 message loop, so pages stay responsive no matter the game's frame rate. CEF
@@ -30,7 +30,10 @@
 #include "include/cef_parser.h"
 #include "include/cef_render_handler.h"
 #include "include/cef_resource_handler.h"
+#include "frames.h"
 #include "gpu.h"
+#include "input.h"
+#include "keys.h"
 #include "scheme.h"
 
 namespace {
@@ -239,21 +242,19 @@ class View : public CefClient,
     rect = CefRect(0, 0, w_, h_);
   }
 
+  // CPU path: CEF hands pixels.
   void OnPaint(CefRefPtr<CefBrowser>, PaintElementType type, const RectList& dirty,
                const void* buffer, int bw, int bh) override {
-    const uint8_t* src = static_cast<const uint8_t*>(buffer);
-    std::lock_guard lock(mu_);
-    if (type == PET_POPUP) {
-      // Dropdowns (<select>, datalist...) paint separately; keep a copy to draw over the view.
-      if (bw != popup_.width || bh != popup_.height) return;
-      popup_px_.resize(static_cast<size_t>(bw) * bh * 4);
-      Convert(src, bw, popup_px_.data(), bw, 0, 0, bw, bh);
-    } else {
-      if (bw != w_ || bh != h_) return;  // stale frame from before a resize
-      for (const CefRect& r : dirty) Convert(src, w_, rgba_.data(), w_, r.x, r.y, r.width, r.height);
+    bool popupShown;
+    CefRect popup;
+    {
+      std::lock_guard lock(mu_);
+      popupShown = popup_shown_;
+      popup = popup_;
     }
-    if (popup_shown_ && !popup_px_.empty()) BlitPopup();
-    dirty_ = true;
+    const uint8_t* src = static_cast<const uint8_t*>(buffer);
+    if (type == PET_POPUP) cpu_.PaintPopup(src, bw, bh, popup);
+    else cpu_.PaintView(src, bw, bh, dirty, popupShown, popup);
   }
 
   // GPU path (shared_texture_enabled): CEF hands a D3D11 texture instead of pixels.
@@ -268,7 +269,7 @@ class View : public CefClient,
     }
     bool ok = type == PET_POPUP
                   ? surface_.PaintPopup(info.shared_texture_handle, popup)
-                  : surface_.PaintView(info.shared_texture_handle, 0, 0, popupShown, popup);
+                  : surface_.PaintView(info.shared_texture_handle, popupShown, popup);
     if (!ok) gpu_failed_ = true;
   }
 
@@ -277,8 +278,8 @@ class View : public CefClient,
       std::lock_guard lock(mu_);
       popup_shown_ = show;
       if (show) return;
-      popup_px_.clear();
     }
+    cpu_.ClearPopup();
     browser->GetHost()->Invalidate(PET_VIEW);  // repaint what the popup covered
   }
 
@@ -289,7 +290,7 @@ class View : public CefClient,
     if (popup_.y + popup_.height > h_) popup_.y = h_ - popup_.height;
     if (popup_.x < 0) popup_.x = 0;
     if (popup_.y < 0) popup_.y = 0;
-    popup_px_.clear();
+    cpu_.ClearPopup();
   }
 
   // A text field gained (mode != NONE) or lost focus; Java uses it to capture the keyboard.
@@ -339,19 +340,9 @@ class View : public CefClient,
       std::lock_guard lock(mu_);
       w_ = w;
       h_ = h;
-      rgba_.assign(gpu_ ? 0 : static_cast<size_t>(w) * h * 4, 0);  // GPU frames never touch it
-      dirty_ = false;
     }
+    if (!gpu_) cpu_.Resize(w, h);
     if (auto host = Host()) host->WasResized();
-  }
-
-  /** Copies the frame into dst (w*h*4 bytes) if a new one arrived since the last call. */
-  bool CopyIfDirty(uint8_t* dst, size_t size) {
-    std::lock_guard lock(mu_);
-    if (!dirty_ || size != rgba_.size()) return false;
-    std::memcpy(dst, rgba_.data(), size);
-    dirty_ = false;
-    return true;
   }
 
   void SetHidden(bool hidden) {
@@ -370,7 +361,9 @@ class View : public CefClient,
     if (auto host = Host()) host->SetFocus(focus);
   }
 
+  /** Render thread: ends the page. */
   void Close() {
+    if (gpu_) surface_.Close();
     {
       std::lock_guard lock(mu_);
       closing_ = true;
@@ -384,44 +377,13 @@ class View : public CefClient,
   }
 
   int CursorCode() const { return cursor_; }
-  bool Gpu() const { return gpu_; }
   bool GpuFailed() const { return gpu_failed_; }
   gpu::Surface& Surface() { return surface_; }
+  CpuFrames& Cpu() { return cpu_; }
   bool Editable() const { return editable_; }
-  bool composing = false;  // render thread only
+  Input input;  // render thread only
 
  private:
-  // Premultiplied BGRA (CEF) -> straight RGBA (Minecraft blending), for one rect.
-  // ponytail: CPU swizzle under the lock; GPU zero-copy path is phase 6.
-  static void Convert(const uint8_t* src, int srcW, uint8_t* dst, int dstW, int x0, int y0, int w,
-                      int h) {
-    for (int y = y0; y < y0 + h; ++y) {
-      const uint8_t* s = src + (static_cast<size_t>(y) * srcW + x0) * 4;
-      uint8_t* d = dst + (static_cast<size_t>(y) * dstW + x0) * 4;
-      for (int x = 0; x < w; ++x, s += 4, d += 4) {
-        uint8_t a = s[3];
-        if (a == 255 || a == 0) {
-          d[0] = s[2]; d[1] = s[1]; d[2] = s[0];
-        } else {
-          d[0] = static_cast<uint8_t>(s[2] * 255 / a);
-          d[1] = static_cast<uint8_t>(s[1] * 255 / a);
-          d[2] = static_cast<uint8_t>(s[0] * 255 / a);
-        }
-        d[3] = a;
-      }
-    }
-  }
-
-  void BlitPopup() {  // caller holds mu_
-    int w = (std::min)(popup_.width, w_ - popup_.x), h = (std::min)(popup_.height, h_ - popup_.y);
-    if (w <= 0 || h <= 0) return;
-    for (int y = 0; y < h; ++y) {
-      std::memcpy(rgba_.data() + (static_cast<size_t>(popup_.y + y) * w_ + popup_.x) * 4,
-                  popup_px_.data() + static_cast<size_t>(y) * popup_.width * 4,
-                  static_cast<size_t>(w) * 4);
-    }
-  }
-
   void Push(float v) {  // caller holds audio_mu_; a full ring drops the oldest sample
     v = v > 1 ? 1 : v < -1 ? -1 : v;
     ring_[head_] = static_cast<int16_t>(v * 32767);
@@ -432,7 +394,8 @@ class View : public CefClient,
   const bool mono_;
   const bool gpu_;
   std::atomic<bool> gpu_failed_ = false;
-  gpu::Surface surface_;
+  gpu::Surface surface_;  // frames: one of the two, by gpu_
+  CpuFrames cpu_;
   std::mutex audio_mu_;  // guards the audio fields
   std::vector<int16_t> ring_;
   size_t head_ = 0, count_ = 0;
@@ -440,11 +403,9 @@ class View : public CefClient,
 
   std::mutex mu_;  // guards everything below except cursor_
   int w_ = 0, h_ = 0;
-  std::vector<uint8_t> rgba_;
   CefRect popup_;
-  std::vector<uint8_t> popup_px_;
   bool popup_shown_ = false;
-  bool dirty_ = false, hidden_ = false, focused_ = false, closing_ = false, loaded_ = false;
+  bool hidden_ = false, focused_ = false, closing_ = false, loaded_ = false;
   std::vector<std::string> messages_;
   std::vector<float> blur_;
   CefRefPtr<CefBrowser> browser_;
@@ -592,104 +553,6 @@ std::wstring ToWide(JNIEnv* env, jstring s) {
 
 View* AsView(jlong handle) { return reinterpret_cast<View*>(handle); }
 
-// --- Input translation (Minecraft 26.x uses SDL3: USB HID scancodes, SDL_Keymod) ---
-
-constexpr int kSdlShift = 0x0003, kSdlCtrl = 0x00C0, kSdlAlt = 0x0300, kSdlGui = 0x0C00,
-              kSdlNum = 0x1000, kSdlCaps = 0x2000, kSdlAltGr = 0x4000;
-
-uint32_t Flags(int sdlMods, int buttons) {
-  uint32_t f = 0;
-  if (sdlMods & kSdlShift) f |= EVENTFLAG_SHIFT_DOWN;
-  if (sdlMods & kSdlCtrl) f |= EVENTFLAG_CONTROL_DOWN;
-  if (sdlMods & kSdlAlt) f |= EVENTFLAG_ALT_DOWN;
-  if (sdlMods & kSdlGui) f |= EVENTFLAG_COMMAND_DOWN;
-  if (sdlMods & kSdlNum) f |= EVENTFLAG_NUM_LOCK_ON;
-  if (sdlMods & kSdlCaps) f |= EVENTFLAG_CAPS_LOCK_ON;
-  if (sdlMods & kSdlAltGr) f |= EVENTFLAG_ALTGR_DOWN;
-  if (buttons & 1) f |= EVENTFLAG_LEFT_MOUSE_BUTTON;
-  if (buttons & 2) f |= EVENTFLAG_MIDDLE_MOUSE_BUTTON;
-  if (buttons & 4) f |= EVENTFLAG_RIGHT_MOUSE_BUTTON;
-  return f;
-}
-
-// USB HID usage -> PS/2 set-1 scancode (0xE0xx = extended). Physical, layout-independent;
-// the layout-aware virtual key comes from MapVirtualKeyW below.
-uint16_t HidToSet1(int hid) {
-  static const uint16_t kAlnum[] = {  // HID 4..56
-      0x1E, 0x30, 0x2E, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32,  // A-M
-      0x31, 0x18, 0x19, 0x10, 0x13, 0x1F, 0x14, 0x16, 0x2F, 0x11, 0x2D, 0x15, 0x2C,  // N-Z
-      0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,                    // 1-0
-      0x1C, 0x01, 0x0E, 0x0F, 0x39,                              // Enter Esc Bksp Tab Space
-      0x0C, 0x0D, 0x1A, 0x1B, 0x2B, 0x2B, 0x27, 0x28, 0x29, 0x33, 0x34, 0x35};  // - = [ ] \ # ; ' ` , . /
-  static const uint16_t kNav[] = {  // HID 57..99
-      0x3A,                                                              // CapsLock
-      0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58,  // F1-F12
-      0xE037, 0x46, 0x45,                                // PrintScreen ScrollLock Pause*
-      0xE052, 0xE047, 0xE049, 0xE053, 0xE04F, 0xE051,    // Ins Home PgUp Del End PgDn
-      0xE04D, 0xE04B, 0xE050, 0xE048,                    // Right Left Down Up
-      0xE045, 0xE035, 0x37, 0x4A, 0x4E, 0xE01C,          // NumLock KP/ KP* KP- KP+ KPEnter
-      0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47, 0x48, 0x49, 0x52, 0x53};  // KP1-9 KP0 KP.
-  if (hid >= 4 && hid <= 56) return kAlnum[hid - 4];
-  if (hid >= 57 && hid <= 99) return kNav[hid - 57];
-  if (hid >= 104 && hid <= 114) return static_cast<uint16_t>(0x64 + hid - 104);  // F13-F23
-  switch (hid) {
-    case 100: return 0x56;    // NonUS backslash
-    case 101: return 0xE05D;  // Menu
-    case 115: return 0x76;    // F24
-    case 133: return 0x7E;    // KP comma (ABNT2)
-    case 135: return 0x73;    // International1 (ABNT2 "/?")
-    case 136: return 0x70;    // International2
-    case 137: return 0x7D;    // International3
-    case 224: return 0x1D;    // LCtrl
-    case 225: return 0x2A;    // LShift
-    case 226: return 0x38;    // LAlt
-    case 227: return 0xE05B;  // LGui
-    case 228: return 0xE01D;  // RCtrl
-    case 229: return 0x36;    // RShift
-    case 230: return 0xE038;  // RAlt
-    case 231: return 0xE05C;  // RGui
-    default: return 0;
-  }
-}
-
-int VirtualKey(uint16_t sc, int sdlMods) {
-  if (sc == 0x45) return VK_PAUSE;  // E1-prefixed, MapVirtualKey can't express it (NumLock is 0xE045)
-  // Keypad digits produce VK_NUMPADn only with NumLock on (as Windows does).
-  // GLFW (older Minecraft) doesn't report lock states, so ask Windows.
-  if ((sdlMods & kSdlNum) || (GetKeyState(VK_NUMLOCK) & 1)) {
-    switch (sc) {
-      case 0x52: return VK_NUMPAD0;
-      case 0x4F: return VK_NUMPAD1;
-      case 0x50: return VK_NUMPAD2;
-      case 0x51: return VK_NUMPAD3;
-      case 0x4B: return VK_NUMPAD4;
-      case 0x4C: return VK_NUMPAD5;
-      case 0x4D: return VK_NUMPAD6;
-      case 0x47: return VK_NUMPAD7;
-      case 0x48: return VK_NUMPAD8;
-      case 0x49: return VK_NUMPAD9;
-      case 0x53: return VK_DECIMAL;
-    }
-  }
-  UINT vk = MapVirtualKeyW(sc, MAPVK_VSC_TO_VK_EX);
-  switch (vk) {  // Chromium expects the generic modifier codes
-    case VK_LSHIFT: case VK_RSHIFT: return VK_SHIFT;
-    case VK_LCONTROL: case VK_RCONTROL: return VK_CONTROL;
-    case VK_LMENU: case VK_RMENU: return VK_MENU;
-    default: return static_cast<int>(vk);
-  }
-}
-
-void SendChar(CefRefPtr<CefBrowserHost> host, char16_t c, uint32_t flags) {
-  CefKeyEvent e;
-  e.type = KEYEVENT_CHAR;
-  e.windows_key_code = c;
-  e.character = c;
-  e.unmodified_character = c;
-  e.modifiers = flags;
-  host->SendKeyEvent(e);
-}
-
 }  // namespace
 
 #define VITRINE(ret, name) JNIEXPORT ret JNICALL Java_dev_holoweb_vitrine_impl_Native_##name
@@ -741,7 +604,6 @@ VITRINE(jlong, create)(JNIEnv* env, jclass, jstring url, jint w, jint h, jint fp
 
 VITRINE(void, destroy)(JNIEnv*, jclass, jlong handle) {
   View* v = AsView(handle);
-  if (v->Gpu()) v->Surface().ReleaseGl();  // GL objects must go on the render thread
   v->Close();
   v->Release();
 }
@@ -749,7 +611,7 @@ VITRINE(void, destroy)(JNIEnv*, jclass, jlong handle) {
 VITRINE(void, resize)(JNIEnv*, jclass, jlong handle, jint w, jint h) { AsView(handle)->Resize(w, h); }
 
 VITRINE(jboolean, copyIfDirty)(JNIEnv*, jclass, jlong handle, jlong dst, jlong size) {
-  return AsView(handle)->CopyIfDirty(reinterpret_cast<uint8_t*>(dst), static_cast<size_t>(size))
+  return AsView(handle)->Cpu().CopyIfDirty(reinterpret_cast<uint8_t*>(dst), static_cast<size_t>(size))
              ? JNI_TRUE
              : JNI_FALSE;
 }
@@ -760,8 +622,8 @@ VITRINE(void, send)(JNIEnv* env, jclass, jlong handle, jstring json) {
   env->ReleaseStringUTFChars(json, utf);
 }
 
-// Next queued vitrine:// request: {id, view, method, host, path, body, trusted}, or null.
-VITRINE(jobjectArray, nextRequest)(JNIEnv* env, jclass) {
+// Next queued vitrine:// request as a Native.Request, or null.
+VITRINE(jobject, nextRequest)(JNIEnv* env, jclass) {
   std::shared_ptr<Request> r;
   {
     std::lock_guard lock(g_req_mu);
@@ -769,20 +631,13 @@ VITRINE(jobjectArray, nextRequest)(JNIEnv* env, jclass) {
     r = g_queue.front();
     g_queue.pop_front();
   }
-  jclass objectClass = env->FindClass("java/lang/Object");
-  jclass longClass = env->FindClass("java/lang/Long");
-  jclass boolClass = env->FindClass("java/lang/Boolean");
-  jmethodID longOf = env->GetStaticMethodID(longClass, "valueOf", "(J)Ljava/lang/Long;");
-  jmethodID boolOf = env->GetStaticMethodID(boolClass, "valueOf", "(Z)Ljava/lang/Boolean;");
-  jobjectArray out = env->NewObjectArray(7, objectClass, nullptr);
-  env->SetObjectArrayElement(out, 0, env->CallStaticObjectMethod(longClass, longOf, static_cast<jlong>(r->id)));
-  env->SetObjectArrayElement(out, 1, env->CallStaticObjectMethod(longClass, longOf, r->view));
-  env->SetObjectArrayElement(out, 2, ToJString(env, r->method));
-  env->SetObjectArrayElement(out, 3, ToJString(env, r->host));
-  env->SetObjectArrayElement(out, 4, ToJString(env, r->path));
-  env->SetObjectArrayElement(out, 5, ToBytes(env, r->body));
-  env->SetObjectArrayElement(out, 6, env->CallStaticObjectMethod(boolClass, boolOf, r->trusted ? JNI_TRUE : JNI_FALSE));
-  return out;
+  // record Request(long id, long view, String method, String host, String path, byte[] body, boolean trusted)
+  jclass type = env->FindClass("dev/holoweb/vitrine/impl/Native$Request");
+  jmethodID make = env->GetMethodID(
+      type, "<init>", "(JJLjava/lang/String;Ljava/lang/String;Ljava/lang/String;[BZ)V");
+  return env->NewObject(type, make, static_cast<jlong>(r->id), r->view, ToJString(env, r->method),
+                        ToJString(env, r->host), ToJString(env, r->path), ToBytes(env, r->body),
+                        static_cast<jboolean>(r->trusted ? JNI_TRUE : JNI_FALSE));
 }
 
 // Answers a request from nextRequest. Unknown ids (cancelled meanwhile) are ignored.
@@ -870,108 +725,38 @@ VITRINE(void, setFocus)(JNIEnv*, jclass, jlong handle, jboolean focus) {
   AsView(handle)->SetFocus(focus);
 }
 
+// --- Input: only type conversion here; what CEF receives is decided in input.cpp ---
+
 VITRINE(void, mouseMove)(JNIEnv*, jclass, jlong handle, jint x, jint y, jint mods, jint buttons,
                          jboolean leave) {
-  auto host = AsView(handle)->Host();
-  if (!host) return;
-  CefMouseEvent e;
-  e.x = x;
-  e.y = y;
-  e.modifiers = Flags(mods, buttons);
-  host->SendMouseMoveEvent(e, leave);
+  Input::MouseMove(AsView(handle)->Host(), x, y, mods, buttons, leave);
 }
 
 VITRINE(void, mouseButton)(JNIEnv*, jclass, jlong handle, jint x, jint y, jint button, jboolean up,
                            jint clicks, jint mods, jint buttons) {
-  auto host = AsView(handle)->Host();
-  if (!host) return;
-  CefMouseEvent e;
-  e.x = x;
-  e.y = y;
-  e.modifiers = Flags(mods, buttons);
-  host->SendMouseClickEvent(e, static_cast<cef_mouse_button_type_t>(button), up, clicks);
+  Input::MouseButton(AsView(handle)->Host(), x, y, button, up, clicks, mods, buttons);
 }
 
 VITRINE(void, mouseWheel)(JNIEnv*, jclass, jlong handle, jint x, jint y, jint dx, jint dy,
                           jint mods) {
-  auto host = AsView(handle)->Host();
-  if (!host) return;
-  CefMouseEvent e;
-  e.x = x;
-  e.y = y;
-  e.modifiers = Flags(mods, 0);
-  host->SendMouseWheelEvent(e, dx, dy);
+  Input::MouseWheel(AsView(handle)->Host(), x, y, dx, dy, mods);
 }
 
-// hid = SDL scancode. Mirrors Win32: WM_KEYDOWN -> RAWKEYDOWN (+ WM_CHAR for control keys).
-VITRINE(jint, hidToSet1)(JNIEnv*, jclass, jint hid) {
-  return HidToSet1(hid);
-}
+VITRINE(jint, hidToSet1)(JNIEnv*, jclass, jint hid) { return HidToSet1(hid); }
 
 VITRINE(void, key)(JNIEnv*, jclass, jlong handle, jint scancode, jint mods, jboolean down,
                    jboolean repeat) {
-  auto host = AsView(handle)->Host();
-  if (!host) return;
-  uint16_t sc = static_cast<uint16_t>(scancode);
-  int vk = VirtualKey(sc, mods);
-  if (vk == 0) return;
-
-  uint32_t flags = Flags(mods, 0);
-  if (repeat) flags |= EVENTFLAG_IS_REPEAT;
-  CefKeyEvent e;
-  e.type = down ? KEYEVENT_RAWKEYDOWN : KEYEVENT_KEYUP;
-  e.windows_key_code = vk;
-  // CEF maps this straight to the DOM `code` (KeycodeConverter): set-1 scancode, 0xE0xx if extended.
-  e.native_key_code = sc;
-  e.is_system_key = (mods & kSdlAlt) && !(mods & kSdlCtrl);
-  e.modifiers = flags;
-  host->SendKeyEvent(e);
-
-  // SDL text input never carries control characters; Win32 would send these as WM_CHAR.
-  if (down && !(mods & kSdlCtrl)) {
-    switch (vk) {
-      case VK_RETURN: SendChar(host, u'\r', flags); break;
-      case VK_TAB: SendChar(host, u'\t', flags); break;
-      case VK_BACK: SendChar(host, u'\b', flags); break;
-      case VK_ESCAPE: SendChar(host, 0x1B, flags); break;
-    }
-  }
+  Input::Key(AsView(handle)->Host(), scancode, mods, down, repeat);
 }
 
 VITRINE(void, text)(JNIEnv* env, jclass, jlong handle, jstring text, jint mods) {
   View* v = AsView(handle);
-  auto host = v->Host();
-  if (!host) return;
-  std::wstring t = ToWide(env, text);
-  if (v->composing) {
-    v->composing = false;
-    host->ImeCommitText(t, CefRange::InvalidRange(), 0);
-    return;
-  }
-  for (wchar_t c : t) SendChar(host, static_cast<char16_t>(c), Flags(mods, 0));
+  v->input.Text(v->Host(), ToWide(env, text), mods);
 }
 
-// IME composition (preedit). Empty text cancels an active composition.
 VITRINE(void, preedit)(JNIEnv* env, jclass, jlong handle, jstring text, jint caret) {
   View* v = AsView(handle);
-  auto host = v->Host();
-  if (!host) return;
-  std::wstring t = ToWide(env, text);
-  if (t.empty()) {
-    if (v->composing) host->ImeCancelComposition();
-    v->composing = false;
-    return;
-  }
-  CefCompositionUnderline u{};
-  u.size = sizeof(u);
-  u.range = {0, static_cast<uint32_t>(t.size())};
-  u.color = CefColorSetARGB(255, 0, 0, 0);
-  u.background_color = CefColorSetARGB(0, 0, 0, 0);
-  u.thick = 0;
-  u.style = CEF_CUS_SOLID;
-  v->composing = true;
-  host->ImeSetComposition(t, {u}, CefRange::InvalidRange(),
-                          CefRange(static_cast<uint32_t>(caret), static_cast<uint32_t>(caret)));
+  v->input.Preedit(v->Host(), ToWide(env, text), caret);
 }
 
 }  // extern "C"

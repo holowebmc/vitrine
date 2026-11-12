@@ -14,7 +14,7 @@ set(OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/out")
 
 ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_RELEASE}" "${CEF_LIB_RELEASE}")
 
-add_library(vitrine SHARED src/vitrine.cpp src/gpu.cpp)
+add_library(vitrine SHARED src/vitrine.cpp src/gpu.cpp src/frames.cpp src/input.cpp src/keys.cpp)
 SET_LIBRARY_TARGET_PROPERTIES(vitrine)
 target_include_directories(vitrine PRIVATE ${CEF_ROOT} ${JNI_INCLUDE_DIRS})
 target_link_libraries(vitrine libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS} d3d11 dxgi d3dcompiler opengl32)
@@ -33,3 +33,11 @@ endforeach()
 
 COPY_FILES(vitrine "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR_RELEASE}" "${OUT_DIR}")
 COPY_FILES(vitrine "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${OUT_DIR}")
+
+# CEF-free checks of the parts that have no CEF in them: ctest --test-dir native/build -C Release
+enable_testing()
+add_executable(vitrine_tests src/tests.cpp src/frames.cpp src/keys.cpp)
+target_include_directories(vitrine_tests PRIVATE ${CEF_ROOT})
+target_compile_features(vitrine_tests PRIVATE cxx_std_20)
+target_compile_definitions(vitrine_tests PRIVATE NOMINMAX)
+add_test(NAME vitrine_tests COMMAND vitrine_tests)
