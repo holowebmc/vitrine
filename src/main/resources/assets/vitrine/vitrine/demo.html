@@ -25,7 +25,8 @@
   .bridge code { display: block; margin-top: 8px; font-size: 13px; opacity: .85; min-height: 1.2em; }
   /* Slots the game draws in (Vitrine.bind): the page only places them. */
   .slots { display: flex; gap: 10px; height: 110px; overflow: auto; }
-  .slots div { --vitrine-bind: vitrine:player; flex: 0 0 80px; height: 140px; border: 1px dashed #556; border-radius: 6px; }
+  .slots div { flex: 0 0 80px; height: 140px; border: 1px dashed #556; border-radius: 6px; }
+  .slots .round { border-radius: 40px; background: #1e293b; }
   .hint { grid-column: 1 / -1; font-size: 13px; opacity: .6; }
   /* ?world: the page is a panel in the world, always showing the full panel. */
   body.world { background: #10162a; }
@@ -103,7 +104,12 @@
     </div>
     <div>
       <label>Render do jogo (--vitrine-bind, 26.2+; role para cortar)</label>
-      <div class="slots"><div></div><div data-vitrine="spin"></div><div data-vitrine="spin" style="opacity:.4"></div></div>
+      <div class="slots">
+        <div style="--vitrine-bind: vitrine:player" id="turning"></div>
+        <div style="--vitrine-bind: vitrine:entity" data-vitrine="minecraft:creeper 30 10" class="round"></div>
+        <div style="--vitrine-bind: vitrine:entity; opacity: .4" data-vitrine="minecraft:armor_stand 200"></div>
+        <div style="--vitrine-bind: vitrine:item" data-vitrine="minecraft:compass"></div>
+      </div>
     </div>
     <div class="shapes">
       <button class="pill">Pílula</button>
@@ -136,6 +142,9 @@
 
   const list = document.getElementById('list');
   for (let i = 1; i <= 40; i++) list.insertAdjacentHTML('beforeend', `<div>item ${i}</div>`);
+
+  // The page says what a slot shows (data-vitrine), and may change it at any time: here, the player's yaw.
+  setInterval(() => turning.dataset.vitrine = Math.round(performance.now() / 20) % 360, 16);
 
   let n = 0;
   btn.onclick = () => clicks.textContent = `cliques: ${++n}`;

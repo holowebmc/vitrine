@@ -88,7 +88,7 @@ public final class GameBlur {
 	}
 
 	/** How far a corner of {@code radius} cuts into the row {@code row} pixels from the edge. */
-	private static int inset(float radius, int row) {
+	static int inset(float radius, int row) {
 		float d = radius - row - 0.5f;
 		return d <= 0 ? 0 : Math.round(radius - (float) Math.sqrt(radius * radius - d * d));
 	}

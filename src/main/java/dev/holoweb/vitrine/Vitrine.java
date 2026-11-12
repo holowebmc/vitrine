@@ -15,7 +15,7 @@ import org.joml.Quaternionfc;
  * <p>Game items as images (Minecraft 26.2+, while in a world): {@code <img src="vitrine://item/minecraft:chest">}
  * is the item's inventory icon, modded items included; add {@code /128} for a size in pixels (default 64).
  *
- * <p>Game rendering in a page (Minecraft 26.2+, screen pages): see {@code bind}.
+ * <p>Game rendering in a page (Minecraft 26.2+): see {@code bind}.
  *
  * <p>Everything here runs on the render thread (client events, screens, key handlers). Views can be
  * created at any time, also while the engine is still downloading on first launch: a page starts
@@ -60,10 +60,17 @@ public final class Vitrine {
 	 * The page decides where the slot is, how big, what clips it ({@code overflow} of ancestors) and its
 	 * {@code opacity}; what shows in it is {@code bind}'s alone, and the page can neither read nor change it.
 	 *
-	 * <p>The slot is drawn over the page, as a rectangle: its background and what it sits in are behind it, but
+	 * <p>Ready to use, with what to show in the element's {@code data-vitrine}: {@code vitrine:item}
+	 * ({@code "minecraft:diamond_sword"}, as in the inventory), {@code vitrine:entity}
+	 * ({@code "minecraft:zombie"}, optionally followed by a yaw and a pitch in degrees: {@code "minecraft:zombie 30 10"})
+	 * and {@code vitrine:player} (the player as they are now; {@code "30 10"} turns them). They fit themselves to
+	 * the slot and need a world. A page can change {@code data-vitrine} at any time, e.g. to turn a model as the
+	 * mouse drags.
+	 *
+	 * <p>The slot is drawn over the page, in the element's box with its {@code border-radius}: its background and what it sits in are behind it, but
 	 * so is anything the page puts on top of it (a tooltip, a menu). It moves with the element, in step with
 	 * the page's picture (scrolling, animations), and is drawn again about 60 times a second, the page's own rate. Names are global: prefix them with your mod id. {@code null} removes the
-	 * bind; one that throws is logged and removed. World panels have no slots yet.
+	 * bind; one that throws is logged and removed. World panels have slots too, flat on the panel.
 	 */
 	public static void bind(String name, Bind bind) {
 		Pages.bind(name, bind);

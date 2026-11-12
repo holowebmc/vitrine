@@ -22,9 +22,10 @@
 // The same scan finds them, and pointer/focus events hurry it, so a depth that starts at :hover shows within 100 ms.
 //
 // Screen pages can leave slots for the game to draw over them (Binds.java): --vitrine-bind: <name> on an element (registered:
-// no inheritance). One line per slot, tab separated: "x,y,width,height,clip x0,y0,x1,y1,opacity" in device pixels
-// (clip = the page and the box of every scrolling/clipping ancestor), the name, the element's data-vitrine attribute.
-// ponytail: transforms use the bounding box; border-radius and clip-path are ignored (the slot is drawn as a rectangle).
+// no inheritance). One line per slot, tab separated: "x,y,width,height,clip x0,y0,x1,y1,opacity,corner radii
+// (TL, TR, BR, BL)" in device pixels (clip = the page and the box of every scrolling/clipping ancestor), the
+// name, the element's data-vitrine attribute. World panels have them too.
+// ponytail: transforms use the bounding box; clip-path and rounded clipping ancestors are ignored.
 const char kBlurScript[] = R"JS((function (report, reportDepth, reportBind) {
   var els = [], raised = [], binds = [], last = null, lastDepth = null, lastShape = '', lastBind = null, mark = null, markOn = false, dirty = true, scanAt = -1e9;
   try {
@@ -212,7 +213,9 @@ const char kBlurScript[] = R"JS((function (report, reportDepth, reportBind) {
       opacity = 1;
       for (c = 0; c < styles.length; c++) opacity *= +styles[c].opacity;
       if (!(opacity > 0.004)) continue;
-      var nums = [r.left * k, r.top * k, r.width * k, r.height * k, x0 * k, y0 * k, x1 * k, y1 * k, opacity];
+      var nums = [r.left * k, r.top * k, r.width * k, r.height * k, x0 * k, y0 * k, x1 * k, y1 * k, opacity,
+          corner(cs.borderTopLeftRadius, r) * k, corner(cs.borderTopRightRadius, r) * k,
+          corner(cs.borderBottomRightRadius, r) * k, corner(cs.borderBottomLeftRadius, r) * k];
       out.push(nums.map(function (n) { return Math.round(n * 100) / 100; }).join(',') + '\t' +
           name.replace(/\s/g, ' ') + '\t' + (el.getAttribute('data-vitrine') || '').replace(/\s/g, ' '));
     }

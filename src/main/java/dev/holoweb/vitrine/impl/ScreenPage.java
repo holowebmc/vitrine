@@ -25,7 +25,7 @@ public final class ScreenPage {
 	private float volume = 1;
 	private boolean closed;
 	//? if >=26.2
-	private final Binds binds = new Binds();
+	private final Binds binds = new Binds(null);
 
 	ScreenPage(String url, Identifier id) {
 		this.url = url;
@@ -103,7 +103,7 @@ public final class ScreenPage {
 		browser.update();
 		browser.audio.update(null, volume, 0);
 		//? if >=26.2
-		if (visible) binds.render(browser.handle);
+		if (visible) binds.render(browser.handle, window.getWidth(), window.getHeight());
 	}
 
 	void draw(GuiGraphicsExtractor gui) {

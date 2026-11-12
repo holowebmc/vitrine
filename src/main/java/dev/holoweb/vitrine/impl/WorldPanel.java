@@ -52,12 +52,16 @@ public final class WorldPanel {
 	private float maxDistance = 64;
 	private float volume = 1, audioRange = 24;
 	private boolean visible = true, shown = true, closed;
+	//? if >=26.2
+	private final Binds binds; // --vitrine-bind slots, drawn by the game
 
 	WorldPanel(String url, int pxWidth, int pxHeight, Vec3 center, Quaternionfc rotation, float width, Identifier id) {
 		this.url = url;
 		this.id = id;
 		this.pxWidth = pxWidth;
 		this.pxHeight = pxHeight;
+		//? if >=26.2
+		binds = new Binds(id.withSuffix("/binds"));
 		move(center, rotation, width);
 	}
 
@@ -122,6 +126,8 @@ public final class WorldPanel {
 		closed = true;
 		Pages.remove(this);
 		if (browser != null) browser.release();
+		//? if >=26.2
+		binds.close();
 	}
 
 	// --- per frame ---
@@ -175,6 +181,8 @@ public final class WorldPanel {
 		browser.update();
 		float[] report = Native.raised(browser.handle); // null: same as before
 		if (report != null) raised = Raised.of(report);
+		//? if >=26.2
+		binds.render(browser.handle, pxWidth, pxHeight);
 	}
 
 	/** Points +Z at the camera: rotY(yaw) * rotX(pitch) keeps the page's right edge level. */
@@ -189,8 +197,33 @@ public final class WorldPanel {
 
 	//? if >=1.21.9 {
 	void submit(SubmitNodeCollector collector, PoseStack poseStack) {
-		if (shown && browser != null && browser.hasFrame()) collector.submitCustomGeometry(poseStack, RenderTypes.text(browser.textureId), this::quad);
+		if (!shown || browser == null || !browser.hasFrame()) return;
+		collector.submitCustomGeometry(poseStack, RenderTypes.text(browser.textureId), this::quad);
+		//? if >=26.2 {
+		Identifier slots = binds.texture();
+		// After the page: drawn first, a see-through slot would keep the page behind it from being drawn at all.
+		if (slots != null) collector.order(1).submitCustomGeometry(poseStack, RenderTypes.text(slots), this::slots);
+		//?}
 	}
+
+	//? if >=26.2 {
+	/**
+	 * The slots, just over the page, showing their part of the binds' texture (bottom-up, as render targets are).
+	 * ponytail: flat on the page, so a slot on an element raised with --vitrine-depth is inside its solid; and the
+	 * texture is premultiplied but drawn with the page's blending, so see-through parts of a model come out darker.
+	 */
+	private void slots(PoseStack.Pose pose, VertexConsumer vc) {
+		binds.cover((slot, x0, y0, x1, y1) -> {
+			int alpha = Math.round(Math.clamp(slot.opacity(), 0, 1) * 255);
+			point(pose, vc, x0, y0, SLOT_LIFT, 255, alpha, x0, pxHeight - y0);
+			point(pose, vc, x0, y1, SLOT_LIFT, 255, alpha, x0, pxHeight - y1);
+			point(pose, vc, x1, y1, SLOT_LIFT, 255, alpha, x1, pxHeight - y1);
+			point(pose, vc, x1, y0, SLOT_LIFT, 255, alpha, x1, pxHeight - y0);
+		});
+	}
+
+	private static final float SLOT_LIFT = 1; // page pixels over the page: enough not to fight it for depth
+	//?}
 	//?} else {
 	/*// Before 1.21.9 level rendering draws immediately, with the given camera pose.
 	void submit(MultiBufferSource buffers, PoseStack.Pose pose) {
@@ -204,16 +237,16 @@ public final class WorldPanel {
 
 	private void quad(PoseStack.Pose pose, VertexConsumer vc) {
 		// Each face counter-clockwise seen from outside; the page itself: top-left, bottom-left, bottom-right, top-right.
-		point(pose, vc, 0, 0, 0, 255, 0, 0);
-		point(pose, vc, 0, pxHeight, 0, 255, 0, pxHeight);
-		point(pose, vc, pxWidth, pxHeight, 0, 255, pxWidth, pxHeight);
-		point(pose, vc, pxWidth, 0, 0, 255, pxWidth, 0);
+		point(pose, vc, 0, 0, 0, 255, 255, 0, 0);
+		point(pose, vc, 0, pxHeight, 0, 255, 255, 0, pxHeight);
+		point(pose, vc, pxWidth, pxHeight, 0, 255, 255, pxWidth, pxHeight);
+		point(pose, vc, pxWidth, 0, 0, 255, 255, pxWidth, 0);
 		Raised solids = raised;
-		if (solids != null) solids.draw((x, y, h, tx, ty, gray) -> point(pose, vc, x, y, h, gray, tx, ty));
+		if (solids != null) solids.draw((x, y, h, tx, ty, gray) -> point(pose, vc, x, y, h, gray, 255, tx, ty));
 	}
 
 	/** A vertex at page pixel (x, y), {@code depth} page pixels out of the face, showing page pixel (tx, ty). */
-	private void point(PoseStack.Pose pose, VertexConsumer vc, float x, float y, float depth, int gray, float tx, float ty) {
+	private void point(PoseStack.Pose pose, VertexConsumer vc, float x, float y, float depth, int gray, int alpha, float tx, float ty) {
 		float s = width / pxWidth; // blocks per page pixel
 		float a = (x - pxWidth / 2f) * s, b = (pxHeight / 2f - y) * s, n = depth * s;
 		// Level rendering is camera-relative.
@@ -222,9 +255,9 @@ public final class WorldPanel {
 		float pz = (float) (center.z - camPos.z) + right.z * a + up.z * b + normal.z * n;
 		float u = tx / pxWidth, v = ty / pxHeight;
 		//? if >=1.21 {
-		vc.addVertex(pose, px, py, pz).setColor(gray, gray, gray, 255).setUv(u, v).setLight(LightCoordsUtil.FULL_BRIGHT);
+		vc.addVertex(pose, px, py, pz).setColor(gray, gray, gray, alpha).setUv(u, v).setLight(LightCoordsUtil.FULL_BRIGHT);
 		//?} else
-		/*vc.vertex(pose.pose(), px, py, pz).color(gray, gray, gray, 255).uv(u, v).uv2(LightCoordsUtil.FULL_BRIGHT).endVertex();*/
+		/*vc.vertex(pose.pose(), px, py, pz).color(gray, gray, gray, alpha).uv(u, v).uv2(LightCoordsUtil.FULL_BRIGHT).endVertex();*/
 	}
 
 	/**
