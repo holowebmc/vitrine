@@ -1,14 +1,12 @@
 package dev.holoweb.vitrine.impl;
 
 //? if >=26.2 {
-import com.mojang.blaze3d.ProjectionType;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.renderpearl.api.GpuFormat;
 import com.mojang.renderpearl.api.buffers.GpuBuffer;
 import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
-import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
@@ -17,22 +15,16 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalDouble;
 import java.util.function.Consumer;
 import javax.imageio.ImageIO;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.Projection;
 import net.minecraft.client.renderer.ProjectionMatrixBuffer;
-import net.minecraft.client.renderer.SubmitNodeStorage;
-import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
-import org.joml.Vector4f;
 
 /**
  * {@code vitrine://item/<namespace:item>[/<pixels>]}: an item as the inventory draws it, as a PNG any page
@@ -44,8 +36,6 @@ final class ItemIcons {
 	// ponytail: never invalidated; clear it on resource reload if packs changing item models mid-game matters.
 	private static final Map<String, byte[]> CACHE = new HashMap<>();
 	private static final PoseStack POSE = new PoseStack();
-	private static final Projection PROJECTION = new Projection();
-	private static final SubmitNodeStorage NODES = new SubmitNodeStorage();
 	private static ProjectionMatrixBuffer projectionBuffer;
 
 	private ItemIcons() {}
@@ -103,28 +93,20 @@ final class ItemIcons {
 			depth.close();
 		};
 		try {
-			device.createCommandEncoder().clearColorAndDepthTextures(color, new Vector4f(0f), depth, 0);
-
 			// Same setup as GuiItemAtlas.drawToSlot, with the one slot being the whole texture.
-			POSE.pushPose();
-			POSE.translate(size / 2f, size / 2f, 0);
-			POSE.scale(size, -size, size);
 			if (projectionBuffer == null) projectionBuffer = new ProjectionMatrixBuffer("Vitrine items");
-			PROJECTION.setupOrtho(-1000, 1000, size, size, true);
-			RenderSystem.backupProjectionMatrix();
-			RenderSystem.setProjectionMatrix(projectionBuffer.getBuffer(PROJECTION), ProjectionType.ORTHOGRAPHIC);
-			mc.gameRenderer.lighting().setupFor(state.usesBlockLight() ? Lighting.Entry.ITEMS_3D : Lighting.Entry.ITEMS_FLAT);
-			try {
-				state.submit(POSE, NODES, 0xF000F0, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, 0);
-				try (var frame = mc.gameRenderer.featureRenderDispatcher().prepareFrame(NODES);
-						RenderPass pass = device.createCommandEncoder().createRenderPass(() -> "Vitrine item", colorView, Optional.empty(), depthView, OptionalDouble.empty())) {
-					RenderSystem.bindDefaultUniforms(pass);
-					FeatureRenderDispatcher.renderAllFeatures(pass, frame);
+			Offscreen.clear(color, depth);
+			Offscreen.draw(color, colorView, depth, depthView, projectionBuffer, size, size, 0, 0, size, size, nodes -> {
+				POSE.pushPose();
+				POSE.translate(size / 2f, size / 2f, 0);
+				POSE.scale(size, -size, size);
+				mc.gameRenderer.lighting().setupFor(state.usesBlockLight() ? Lighting.Entry.ITEMS_3D : Lighting.Entry.ITEMS_FLAT);
+				try {
+					state.submit(POSE, nodes, 0xF000F0, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, 0);
+				} finally {
+					POSE.popPose();
 				}
-			} finally {
-				RenderSystem.restoreProjectionMatrix();
-				POSE.popPose();
-			}
+			});
 
 			device.createCommandEncoder().copyTextureToBuffer(color, pixels, 0, () -> {
 				byte[] png = null;

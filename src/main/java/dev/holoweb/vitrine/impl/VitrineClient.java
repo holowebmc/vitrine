@@ -135,6 +135,27 @@ public final class VitrineClient implements ClientModInitializer {
 		/*var category = "key.categories.misc";*/
 		KeyMapping key = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.vitrine.demo", InputConstants.KEY_F8, category));
 		KeyMapping worldKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.vitrine.demo_world", InputConstants.KEY_F9, category));
+		//? if >=26.2 {
+		// A page slot drawn by the game: the player, as the inventory shows it; data-vitrine="spin" turns it.
+		Vitrine.bind("vitrine:player", (slot, pose, nodes) -> {
+			Minecraft mc = Minecraft.getInstance();
+			if (mc.player == null) return;
+			var dispatcher = mc.getEntityRenderDispatcher();
+			var state = dispatcher.getRenderer(mc.player).createRenderState(mc.player, 1f);
+			state.shadowPieces.clear();
+			state.outlineColor = 0;
+			if (state instanceof net.minecraft.client.renderer.entity.state.LivingEntityRenderState living) {
+				living.bodyRot = 180;
+				living.yRot = living.xRot = 0;
+			}
+			float scale = slot.height() / 2.2f; // the player is 1.8 blocks tall
+			float turn = slot.data().equals("spin") ? System.currentTimeMillis() % 4000 / 4000f * 6.2832f : 0.4f;
+			pose.scale(scale, scale, scale);
+			pose.translate(0, state.boundingBoxHeight / 2, 0);
+			pose.rotate(new Quaternionf().rotateZ((float) Math.PI).rotateY(turn));
+			dispatcher.submit(state, new net.minecraft.client.renderer.state.level.CameraRenderState(), 0, 0, 0, pose, nodes);
+		});
+		//?}
 		ScreenView[] demo = {null};
 		WorldView[] panel = {null};
 		ClientTickEvents.END_CLIENT_TICK.register(mc -> {

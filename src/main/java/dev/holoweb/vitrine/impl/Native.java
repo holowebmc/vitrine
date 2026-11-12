@@ -55,6 +55,12 @@ public final class Native {
 	public static native float[] blurRects(long handle);
 
 	/**
+	 * The page's {@code --vitrine-bind} slots, UTF-8, one line each (helper.cpp; {@code Binds} parses it), as of the
+	 * page frame last taken. Null while nothing changed since the last call; empty when the page has no slots.
+	 */
+	public static native byte[] bindSlots(long handle);
+
+	/**
 	 * Outlines of the elements the page raises with {@code --vitrine-depth}, in page pixels, per element:
 	 * bottom, top (heights over the page), point count, then x, y per point. Null while nothing changed since
 	 * the last call; an empty array when the page stopped raising anything. Untrusted: {@link Raised} checks it.

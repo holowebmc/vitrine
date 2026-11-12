@@ -20,18 +20,37 @@
 // - The outline is cut by the page and by the box of every scrolling/clipping ancestor.
 // ponytail: transforms use the bounding box; clip-path path()/inset() and rounded clipping ancestors are ignored.
 // The same scan finds them, and pointer/focus events hurry it, so a depth that starts at :hover shows within 100 ms.
-const char kBlurScript[] = R"JS((function (report, reportDepth) {
-  var els = [], raised = [], last = null, lastDepth = null, lastShape = '', dirty = true, scanAt = -1e9;
+//
+// Screen pages can leave slots for the game to draw over them (Binds.java): --vitrine-bind: <name> on an element (registered:
+// no inheritance). One line per slot, tab separated: "x,y,width,height,clip x0,y0,x1,y1,opacity" in device pixels
+// (clip = the page and the box of every scrolling/clipping ancestor), the name, the element's data-vitrine attribute.
+// ponytail: transforms use the bounding box; border-radius and clip-path are ignored (the slot is drawn as a rectangle).
+const char kBlurScript[] = R"JS((function (report, reportDepth, reportBind) {
+  var els = [], raised = [], binds = [], last = null, lastDepth = null, lastShape = '', lastBind = null, mark = null, markOn = false, dirty = true, scanAt = -1e9;
+  try {
+    CSS.registerProperty({name: '--vitrine-bind', syntax: '*', inherits: false});
+  } catch (e) {}
   try {
     CSS.registerProperty({name: '--vitrine-depth', syntax: '<length>', inherits: false, initialValue: '0px'});
   } catch (e) {}
   function scan() {
     els = [];
     raised = [];
+    binds = [];
     var all = document.querySelectorAll('*'), found = new Map();
     for (var i = 0; i < all.length; i++) {
       var cs = getComputedStyle(all[i]);
       if (cs.backdropFilter.indexOf('blur(') >= 0) els.push(all[i]);
+      if (cs.getPropertyValue('--vitrine-bind').trim()) {
+        // Computed styles are live: kept from scan to scan, so a frame only reads them (its own, then its ancestors').
+        var slot = {el: all[i], styles: [cs], clips: []};
+        for (var b = all[i].parentElement; b; b = b.parentElement) {
+          var bcs = getComputedStyle(b);
+          slot.styles.push(bcs);
+          if (bcs.overflowX !== 'visible' || bcs.overflowY !== 'visible') slot.clips.push(b);
+        }
+        binds.push(slot);
+      }
       if (!(parseFloat(cs.getPropertyValue('--vitrine-depth')) > 0)) continue;
       // Document order: ancestors come first. Remember what it stands on and what cuts it.
       var entry = {el: all[i], on: null, clips: []};
@@ -172,9 +191,51 @@ const char kBlurScript[] = R"JS((function (report, reportDepth) {
       lastDepth = s;
       lastShape = moved;
     }
+
+    out = [];
+    var boxes = new Map(), styles;  // slots in one scrolling container share its box: read it once a frame
+    for (i = 0; i < binds.length && out.length < 64; i++) {  // the browser side takes 16 KB
+      el = binds[i].el;
+      if (!el.isConnected) continue;
+      styles = binds[i].styles;
+      cs = styles[0];
+      var name = cs.getPropertyValue('--vitrine-bind').trim().replace(/^["']|["']$/g, '');
+      if (!name || cs.visibility !== 'visible') continue;
+      r = el.getBoundingClientRect();
+      x0 = 0; y0 = 0; x1 = innerWidth; y1 = innerHeight; clips = binds[i].clips;
+      for (c = 0; c < clips.length; c++) {
+        cr = boxes.get(clips[c]);
+        if (!cr) boxes.set(clips[c], cr = clips[c].getBoundingClientRect());
+        x0 = Math.max(x0, cr.left); y0 = Math.max(y0, cr.top); x1 = Math.min(x1, cr.right); y1 = Math.min(y1, cr.bottom);
+      }
+      if (r.width <= 0 || r.height <= 0 || r.right <= x0 || r.bottom <= y0 || r.left >= x1 || r.top >= y1) continue;
+      opacity = 1;
+      for (c = 0; c < styles.length; c++) opacity *= +styles[c].opacity;
+      if (!(opacity > 0.004)) continue;
+      var nums = [r.left * k, r.top * k, r.width * k, r.height * k, x0 * k, y0 * k, x1 * k, y1 * k, opacity];
+      out.push(nums.map(function (n) { return Math.round(n * 100) / 100; }).join(',') + '\t' +
+          name.replace(/\s/g, ' ') + '\t' + (el.getAttribute('data-vitrine') || '').replace(/\s/g, ' '));
+    }
+    s = out.join('\n');
+    if (s !== lastBind) {
+      // The report is for this frame, but frames painted before it are still on their way to the game. So this
+      // frame is marked: its top left pixel changes (not to the eye), and the browser side waits for that paint.
+      if (!mark) {
+        mark = document.createElement('div');
+        mark.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;z-index:2147483647;pointer-events:none';
+      }
+      if (!mark.isConnected) document.documentElement.appendChild(mark);
+      mark.style.background = (markOn = !markOn) ? 'rgba(0,0,0,.01)' : 'rgba(0,0,0,.02)';
+      reportBind(lastBind = s);
+    }
   }
   function hurry() { dirty = true; }
-  new MutationObserver(hurry).observe(document, {subtree: true, childList: true, attributes: true});
+  function changed(list) {  // our own mark is no reason to look at the page again
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].target !== mark && list[i].addedNodes[0] !== mark) return hurry();
+    }
+  }
+  new MutationObserver(changed).observe(document, {subtree: true, childList: true, attributes: true});
   ['pointerover', 'pointerout', 'pointerdown', 'pointerup', 'focusin', 'focusout'].forEach(function (type) {
     addEventListener(type, hurry, true);
   });
@@ -212,7 +273,8 @@ class HelperApp : public CefApp, public CefRenderProcessHandler {
     CefRefPtr<CefV8Exception> error;
     if (!context->Eval(kBlurScript, "vitrine://vitrine/blur.js", 1, start, error)) return;
     start->ExecuteFunction(nullptr, {CefV8Value::CreateFunction("report", new BlurReport("vitrine.blur")),
-                                     CefV8Value::CreateFunction("reportDepth", new BlurReport("vitrine.depth"))});
+                                     CefV8Value::CreateFunction("reportDepth", new BlurReport("vitrine.depth")),
+                                     CefV8Value::CreateFunction("reportBind", new BlurReport("vitrine.bind"))});
   }
   IMPLEMENT_REFCOUNTING(HelperApp);
 };

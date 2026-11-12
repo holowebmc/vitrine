@@ -24,6 +24,8 @@ public final class ScreenPage {
 	private boolean visible = true, wantsFocus;
 	private float volume = 1;
 	private boolean closed;
+	//? if >=26.2
+	private final Binds binds = new Binds();
 
 	ScreenPage(String url, Identifier id) {
 		this.url = url;
@@ -89,6 +91,8 @@ public final class ScreenPage {
 		closed = true;
 		Pages.remove(this);
 		if (browser != null) browser.release();
+		//? if >=26.2
+		binds.close();
 	}
 
 	/** Called every frame: keeps the page at framebuffer size and uploads new frames. */
@@ -98,6 +102,8 @@ public final class ScreenPage {
 		browser.resize(window.getWidth(), window.getHeight());
 		browser.update();
 		browser.audio.update(null, volume, 0);
+		//? if >=26.2
+		if (visible) binds.render(browser.handle);
 	}
 
 	void draw(GuiGraphicsExtractor gui) {
@@ -108,6 +114,8 @@ public final class ScreenPage {
 			//?}
 			//? if >=1.21.6 {
 			gui.blit(browser.textureId, 0, 0, gui.guiWidth(), gui.guiHeight(), 0, 1, 0, 1);
+			//? if >=26.2
+			binds.draw(gui); // --vitrine-bind slots, drawn by the game over the page
 			//?} else if >=1.21.2 {
 			/*int w = browser.width, h = browser.height;
 			gui.blit(net.minecraft.client.renderer.RenderType::guiTextured, browser.textureId, 0, 0, 0, 0, gui.guiWidth(), gui.guiHeight(), w, h, w, h);

@@ -61,7 +61,70 @@ std::mutex g_live_mu;
 std::condition_variable g_live_cv;
 int g_live = 0;
 
-class View : public CefClient,
+// What a page says about where its elements are (raised outlines, bind slots). The page reports while it
+// builds a frame, so the report gets here before that frame's pixels, and with frames still on their way
+// (two or three, with shared textures): used at once, a moving element (scrolling) would be drawn at its new
+// place over an old picture. So reports wait in line: the paint of their frame marks the oldest as on screen,
+// and it becomes current when the game takes that frame. Not thread safe.
+template <typename T>
+struct Synced {
+  /** `timeout`: how long a report waits for a frame that never comes. */
+  explicit Synced(int timeout_ms) : timeout_(timeout_ms) {}
+
+  /** `wait` false: nothing moved, so it becomes current now (unless an earlier report is still waiting). */
+  void Report(T& value, bool wait) {
+    bool waiting = !pending_.empty() || painted_;
+    if (!wait && !waiting) {
+      current_.swap(value);
+      changed_ = true;
+      return;
+    }
+    if (!waiting) since_ = std::chrono::steady_clock::now();
+    if (pending_.size() == 8) pending_.pop_front();  // frames were lost: Take() catches up when they stop coming
+    pending_.emplace_back();
+    pending_.back().swap(value);
+  }
+
+  /** The frame of the oldest waiting report was painted. */
+  void Painted() {
+    if (pending_.empty()) return;
+    ready_.swap(pending_.front());
+    pending_.pop_front();
+    painted_ = true;
+  }
+
+  /** The game took the newest frame. */
+  void Taken() {
+    if (!painted_) return;
+    current_.swap(ready_);
+    painted_ = false;
+    changed_ = true;
+    since_ = std::chrono::steady_clock::now();  // for the reports still waiting
+  }
+
+  /** The current report, once per change: false when the last answer still stands. */
+  bool Take(T& out) {
+    if ((!pending_.empty() || painted_) && std::chrono::steady_clock::now() - since_ > timeout_) {
+      current_.swap(pending_.empty() ? ready_ : pending_.back());  // their frames never came: stop waiting
+      pending_.clear();
+      painted_ = false;
+      changed_ = true;
+    }
+    if (!changed_) return false;
+    changed_ = false;
+    out = current_;
+    return true;
+  }
+
+ private:
+  T current_, ready_;  // in use; painted but its frame not taken yet
+  std::deque<T> pending_;  // reported, their frames not painted yet
+  bool changed_ = false, painted_ = false;
+  std::chrono::milliseconds timeout_;
+  std::chrono::steady_clock::time_point since_;  // when the oldest waiting report started waiting, or the last take
+};
+
+class View: public CefClient,
              public CefAudioHandler,
              public CefRenderHandler,
              public CefLifeSpanHandler,
@@ -189,6 +252,13 @@ class View : public CefClient,
 
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefProcessId,
                                 CefRefPtr<CefProcessMessage> message) override {
+    if (message->GetName() == "vitrine.bind") {
+      std::string text = message->GetArgumentList()->GetString(0).ToString();
+      if (text.size() > 16384) text.clear();  // pages are untrusted: bounded
+      std::lock_guard lock(mu_);
+      binds_.Report(text, true);
+      return true;
+    }
     bool depth = message->GetName() == "vitrine.depth";
     if (!depth && message->GetName() != "vitrine.blur") return false;
     size_t limit = depth ? 16384 : 10 * 64;  // pages are untrusted: bounded
@@ -205,15 +275,7 @@ class View : public CefClient,
       // Variable length per element (Raised.java checks it), after a first number: did outlines move?
       bool moved = rects.empty() || rects[0] != 0;
       if (!rects.empty()) rects.erase(rects.begin());
-      bool waiting = depth_reported_ || depth_painted_;
-      if (!moved && !waiting) {
-        depth_.swap(rects);
-        depth_changed_ = true;
-      } else {
-        if (!waiting) depth_since_ = std::chrono::steady_clock::now();
-        depth_next_.swap(rects);
-        depth_reported_ = true;
-      }
+      depth_.Report(rects, moved);
     } else {
       rects.resize(rects.size() / 10 * 10);
       blur_.swap(rects);
@@ -221,47 +283,43 @@ class View : public CefClient,
     return true;
   }
 
-  // The page reports outlines while it builds a frame, so they get here before that frame's pixels. Drawn at
-  // once, a moving element (scrolling) would show last frame's picture on this frame's solid. So outlines that
-  // moved wait: a paint marks them as on screen, and they become current when the game takes that frame.
-
-  /** CEF UI thread: a frame of the page was painted. */
-  void FramePainted() {
+  /**
+   * CEF UI thread: a frame of the page was painted. `marked`: its top left pixel changed, which the page does
+   * for every bind report (helper.cpp), so this is the frame of the oldest one waiting.
+   * ponytail: a page that also repaints that pixel by itself (all of it changing every frame) makes reports
+   * count for frames that came before theirs, so its slots run a frame or two ahead of its picture.
+   */
+  void FramePainted(const RectList& dirty) {
+    bool marked = false;
+    for (const CefRect& r : dirty) marked = marked || (r.x <= 0 && r.y <= 0 && r.width > 0 && r.height > 0);
     std::lock_guard lock(mu_);
-    if (!depth_reported_) return;
-    depth_ready_.swap(depth_next_);
-    depth_reported_ = false;
-    depth_painted_ = true;
+    depth_.Painted();
+    if (marked) binds_.Painted();
   }
 
   /** Render thread: the game took the newest frame. */
   void FrameTaken() {
     std::lock_guard lock(mu_);
-    if (!depth_painted_) return;
-    depth_.swap(depth_ready_);
-    depth_painted_ = false;
-    depth_changed_ = true;
-    depth_since_ = std::chrono::steady_clock::now();  // for a report still waiting
+    depth_.Taken();
+    binds_.Taken();
   }
 
   /** The raised elements' outlines (see helper.cpp), once per report: false when the last answer still stands. */
   bool TakeRaised(std::vector<float>& out) {
     std::lock_guard lock(mu_);
-    if ((depth_reported_ || depth_painted_) && std::chrono::steady_clock::now() - depth_since_ > std::chrono::milliseconds(50)) {
-      depth_.swap(depth_reported_ ? depth_next_ : depth_ready_);  // its frame never came: stop waiting
-      depth_reported_ = depth_painted_ = false;
-      depth_changed_ = true;
-    }
-    if (!depth_changed_) return false;
-    depth_changed_ = false;
-    out = depth_;
-    return true;
+    return depth_.Take(out);
   }
 
   /** 10 floats per rect (see helper.cpp); empty when the page blurs nothing. */
   std::vector<float> BlurRects() {
     std::lock_guard lock(mu_);
     return blur_;
+  }
+
+  /** One line per --vitrine-bind slot (see helper.cpp), once per report: false when the last answer still stands. */
+  bool TakeBinds(std::string& out) {
+    std::lock_guard lock(mu_);
+    return binds_.Take(out);
   }
 
   // --- Java -> JS messages, held until the page has finished loading ---
@@ -307,13 +365,13 @@ class View : public CefClient,
       popup = popup_;
     }
     const uint8_t* src = static_cast<const uint8_t*>(buffer);
+    if (type == PET_VIEW) FramePainted(dirty);  // first: see OnAcceleratedPaint
     if (type == PET_POPUP) cpu_.PaintPopup(src, bw, bh, popup);
     else cpu_.PaintView(src, bw, bh, dirty, popupShown, popup);
-    if (type == PET_VIEW) FramePainted();
   }
 
   // GPU path (shared_texture_enabled): CEF hands a D3D11 texture instead of pixels.
-  void OnAcceleratedPaint(CefRefPtr<CefBrowser>, PaintElementType type, const RectList&,
+  void OnAcceleratedPaint(CefRefPtr<CefBrowser>, PaintElementType type, const RectList& dirty,
                           const CefAcceleratedPaintInfo& info) override {
     bool popupShown;
     CefRect popup;
@@ -322,11 +380,13 @@ class View : public CefClient,
       popupShown = popup_shown_;
       popup = popup_;
     }
+    // Before the frame: the game can take it as soon as it is there, and a report marked after that would
+    // wait for the next frame.
+    if (type == PET_VIEW) FramePainted(dirty);
     bool ok = type == PET_POPUP
                   ? surface_.PaintPopup(info.shared_texture_handle, popup)
                   : surface_.PaintView(info.shared_texture_handle, popupShown, popup);
     if (!ok) gpu_failed_ = true;
-    if (type == PET_VIEW) FramePainted();
   }
 
   void OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) override {
@@ -468,10 +528,8 @@ class View : public CefClient,
   bool hidden_ = false, focused_ = false, closing_ = false, loaded_ = false;
   std::vector<std::string> messages_;
   std::vector<float> blur_;
-  // Raised outlines: current, painted but its frame not taken yet, reported but not painted yet.
-  std::vector<float> depth_, depth_ready_, depth_next_;
-  bool depth_changed_ = false, depth_painted_ = false, depth_reported_ = false;
-  std::chrono::steady_clock::time_point depth_since_;  // when the oldest waiting report started waiting
+  Synced<std::vector<float>> depth_{50};  // raised outlines: any paint is taken for their frame
+  Synced<std::string> binds_{150};  // --vitrine-bind slots: their frame always comes, a few frames later
   CefRefPtr<CefBrowser> browser_;
   std::atomic<int> cursor_ = kArrow;
   std::atomic<bool> editable_ = false;
@@ -771,6 +829,16 @@ VITRINE(jfloatArray, blurRects)(JNIEnv* env, jclass, jlong handle) {
   if (rects.empty()) return nullptr;
   jfloatArray out = env->NewFloatArray(static_cast<jsize>(rects.size()));
   env->SetFloatArrayRegion(out, 0, static_cast<jsize>(rects.size()), rects.data());
+  return out;
+}
+
+// The page's --vitrine-bind slots as UTF-8 text (Binds.java parses it), or null while they haven't changed
+// since the last call (so a page with no slots answers one empty array, then null).
+VITRINE(jbyteArray, bindSlots)(JNIEnv* env, jclass, jlong handle) {
+  std::string text;
+  if (!AsView(handle)->TakeBinds(text)) return nullptr;
+  jbyteArray out = env->NewByteArray(static_cast<jsize>(text.size()));
+  env->SetByteArrayRegion(out, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte*>(text.data()));
   return out;
 }
 

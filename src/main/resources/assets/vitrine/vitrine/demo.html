@@ -7,7 +7,7 @@
   /* backdrop-filter: blur() blurs the game behind the page (screen pages). */
   .card { background: rgba(16, 22, 40, .6); border: 1px solid rgba(255,255,255,.15); border-radius: 10px; backdrop-filter: blur(14px); }
   #hud { position: fixed; top: 16px; right: 16px; padding: 10px 16px; font-size: 22px; }
-  #panel { position: fixed; inset: 0; margin: auto; width: 760px; height: 660px; padding: 20px 28px;
+  #panel { position: fixed; inset: 0; margin: auto; width: 760px; height: 800px; padding: 20px 28px;
            display: none; grid-template-columns: 1fr 1fr; gap: 16px 24px; box-sizing: border-box; }
   body.focused #panel { display: grid; }
   body.focused { background: rgba(0, 0, 0, .35); backdrop-filter: blur(3px); }
@@ -23,6 +23,9 @@
   #keys { font: 13px ui-monospace, monospace; height: 120px; overflow: hidden; white-space: pre; opacity: .85; }
   .bridge { grid-column: 1 / -1; }
   .bridge code { display: block; margin-top: 8px; font-size: 13px; opacity: .85; min-height: 1.2em; }
+  /* Slots the game draws in (Vitrine.bind): the page only places them. */
+  .slots { display: flex; gap: 10px; height: 110px; overflow: auto; }
+  .slots div { --vitrine-bind: vitrine:player; flex: 0 0 80px; height: 140px; border: 1px dashed #556; border-radius: 6px; }
   .hint { grid-column: 1 / -1; font-size: 13px; opacity: .6; }
   /* ?world: the page is a panel in the world, always showing the full panel. */
   body.world { background: #10162a; }
@@ -97,6 +100,10 @@
       <button id="secBtn">Testar permissões</button>
       <input type="file" id="file" style="width:auto;margin-top:6px" title="não deve abrir o seletor do Windows">
       <pre id="sec" style="margin:6px 0 0;font-size:12px;white-space:pre-wrap"></pre>
+    </div>
+    <div>
+      <label>Render do jogo (--vitrine-bind, 26.2+; role para cortar)</label>
+      <div class="slots"><div></div><div data-vitrine="spin"></div><div data-vitrine="spin" style="opacity:.4"></div></div>
     </div>
     <div class="shapes">
       <button class="pill">Pílula</button>

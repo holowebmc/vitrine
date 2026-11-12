@@ -33,6 +33,12 @@ public final class Pages {
 		Bridge.serve(host, files);
 	}
 
+	//? if >=26.2 {
+	public static void bind(String name, dev.holoweb.vitrine.Vitrine.Bind bind) {
+		Binds.register(name, bind);
+	}
+	//?}
+
 	/** A page created before CEF is up starts loading once it is. */
 	public static ScreenPage screen(String url) {
 		ScreenPage page = new ScreenPage(url, id("screen/" + nextId++));
