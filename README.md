@@ -35,7 +35,7 @@ The public API is the `dev.holoweb.vitrine` package (`Vitrine`, `ScreenView`, `W
 
 ## Building and verifying
 
-The jar carries two native binaries, `vitrine.dll` and `vitrine_helper.exe`, built from [`native/`](native). Releases are never built on a developer's machine: [`release.yml`](.github/workflows/release.yml) compiles the natives and every jar from a tagged commit, then uploads them to Modrinth and to the [GitHub release](https://github.com/holowebmc/vitrine/releases).
+The jar carries two native binaries, `vitrine.dll` and `vitrine_helper.exe`, built from [`native/`](native). [`release.yml`](.github/workflows/release.yml) compiles the natives and every jar from a tagged commit, then uploads them to Modrinth and to the [GitHub release](https://github.com/holowebmc/vitrine/releases).
 
 To check a download, compare its SHA-512 (Modrinth shows it per file) with `SHA512SUMS` in the release, or run `gh attestation verify vitrine-<version>.jar --repo holowebmc/vitrine`.
 
