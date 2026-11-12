@@ -319,6 +319,10 @@ class View : public CefClient,
     }
     auto host = browser->GetHost();
     if (closing) return host->CloseBrowser(true);  // destroy() came before creation finished
+    // The audio handler only takes a stream over (and silences Chromium's own output) once it is
+    // already playing: its first milliseconds reach the speakers directly, whatever the game's volume.
+    // Muted from the start nothing does; the handler still receives the audio.
+    host->SetAudioMuted(true);
     if (hidden) host->WasHidden(true);
     if (focused) host->SetFocus(true);
   }
