@@ -54,6 +54,13 @@ public final class Native {
 	 */
 	public static native float[] blurRects(long handle);
 
+	/**
+	 * Outlines of the elements the page raises with {@code --vitrine-depth}, in page pixels, per element:
+	 * bottom, top (heights over the page), point count, then x, y per point. Null while nothing changed since
+	 * the last call; an empty array when the page stopped raising anything. Untrusted: {@link Raised} checks it.
+	 */
+	public static native float[] raised(long handle);
+
 	/** Sample rate of the page's current audio stream, 0 while it is silent. */
 	public static native int audioRate(long handle);
 

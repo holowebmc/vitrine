@@ -47,6 +47,7 @@ public final class WorldPanel {
 	private final Quaternionf rotation = new Quaternionf();
 	private float width, height;
 	private boolean billboard;
+	private Raised raised; // elements standing out of the panel (--vitrine-depth), or null
 	private final Vector3f right = new Vector3f(), up = new Vector3f(), normal = new Vector3f();
 	private float maxDistance = 64;
 	private float volume = 1, audioRange = 24;
@@ -172,6 +173,8 @@ public final class WorldPanel {
 		// ponytail: fixed distance tiers; make them configurable if a mod needs it.
 		browser.fps(d < 16 ? 60 : d < 32 ? 30 : 15);
 		browser.update();
+		float[] report = Native.raised(browser.handle); // null: same as before
+		if (report != null) raised = Raised.of(report);
 	}
 
 	/** Points +Z at the camera: rotY(yaw) * rotX(pitch) keeps the page's right edge level. */
@@ -200,22 +203,28 @@ public final class WorldPanel {
 	*///?}
 
 	private void quad(PoseStack.Pose pose, VertexConsumer vc) {
-		Vec3 c = center.subtract(camPos); // level rendering is camera-relative
-		float cx = (float) c.x, cy = (float) c.y, cz = (float) c.z;
-		float rx = right.x * width / 2, ry = right.y * width / 2, rz = right.z * width / 2;
-		float ux = up.x * height / 2, uy = up.y * height / 2, uz = up.z * height / 2;
-		// Counter-clockwise seen from the front: top-left, bottom-left, bottom-right, top-right.
-		vertex(pose, vc, cx - rx + ux, cy - ry + uy, cz - rz + uz, 0, 0);
-		vertex(pose, vc, cx - rx - ux, cy - ry - uy, cz - rz - uz, 0, 1);
-		vertex(pose, vc, cx + rx - ux, cy + ry - uy, cz + rz - uz, 1, 1);
-		vertex(pose, vc, cx + rx + ux, cy + ry + uy, cz + rz + uz, 1, 0);
+		// Each face counter-clockwise seen from outside; the page itself: top-left, bottom-left, bottom-right, top-right.
+		point(pose, vc, 0, 0, 0, 255, 0, 0);
+		point(pose, vc, 0, pxHeight, 0, 255, 0, pxHeight);
+		point(pose, vc, pxWidth, pxHeight, 0, 255, pxWidth, pxHeight);
+		point(pose, vc, pxWidth, 0, 0, 255, pxWidth, 0);
+		Raised solids = raised;
+		if (solids != null) solids.draw((x, y, h, tx, ty, gray) -> point(pose, vc, x, y, h, gray, tx, ty));
 	}
 
-	private static void vertex(PoseStack.Pose pose, VertexConsumer vc, float x, float y, float z, float u, float v) {
+	/** A vertex at page pixel (x, y), {@code depth} page pixels out of the face, showing page pixel (tx, ty). */
+	private void point(PoseStack.Pose pose, VertexConsumer vc, float x, float y, float depth, int gray, float tx, float ty) {
+		float s = width / pxWidth; // blocks per page pixel
+		float a = (x - pxWidth / 2f) * s, b = (pxHeight / 2f - y) * s, n = depth * s;
+		// Level rendering is camera-relative.
+		float px = (float) (center.x - camPos.x) + right.x * a + up.x * b + normal.x * n;
+		float py = (float) (center.y - camPos.y) + right.y * a + up.y * b + normal.y * n;
+		float pz = (float) (center.z - camPos.z) + right.z * a + up.z * b + normal.z * n;
+		float u = tx / pxWidth, v = ty / pxHeight;
 		//? if >=1.21 {
-		vc.addVertex(pose, x, y, z).setColor(-1).setUv(u, v).setLight(LightCoordsUtil.FULL_BRIGHT);
+		vc.addVertex(pose, px, py, pz).setColor(gray, gray, gray, 255).setUv(u, v).setLight(LightCoordsUtil.FULL_BRIGHT);
 		//?} else
-		/*vc.vertex(pose.pose(), x, y, z).color(255, 255, 255, 255).uv(u, v).uv2(LightCoordsUtil.FULL_BRIGHT).endVertex();*/
+		/*vc.vertex(pose.pose(), px, py, pz).color(gray, gray, gray, 255).uv(u, v).uv2(LightCoordsUtil.FULL_BRIGHT).endVertex();*/
 	}
 
 	/**
@@ -232,14 +241,25 @@ public final class WorldPanel {
 		double hx = origin.x + dir.x * t - center.x, hy = origin.y + dir.y * t - center.y, hz = origin.z + dir.z * t - center.z;
 		double u = (hx * right.x + hy * right.y + hz * right.z) / width + 0.5;
 		double v = 0.5 - (hx * up.x + hy * up.y + hz * up.z) / height;
-		if (bounded && (u < 0 || u > 1 || v < 0 || v > 1)) return null;
-		return new double[] {t, u * pxWidth, v * pxHeight};
+		double[] best = bounded && (u < 0 || u > 1 || v < 0 || v > 1) ? null : new double[] {t, u * pxWidth, v * pxHeight};
+		// Raised elements stand between the eye and the page: the ray may meet one first.
+		Raised solids = raised;
+		if (solids == null) return best;
+		double along = dir.x * right.x + dir.y * right.y + dir.z * right.z, upward = dir.x * up.x + dir.y * up.y + dir.z * up.z;
+		double[] h = solids.hit(u * pxWidth, v * pxHeight, along / facing, -upward / facing);
+		if (h == null) return best;
+		double sooner = t + h[0] * width / pxWidth / facing; // facing < 0: it meets the solid before the page
+		return sooner < 0 ? best : new double[] {sooner, h[1], h[2]};
 	}
 
 	private AABB bounds() {
 		double ex = Math.abs(right.x) * width / 2 + Math.abs(up.x) * height / 2;
 		double ey = Math.abs(right.y) * width / 2 + Math.abs(up.y) * height / 2;
 		double ez = Math.abs(right.z) * width / 2 + Math.abs(up.z) * height / 2;
-		return new AABB(center.x - ex, center.y - ey, center.z - ez, center.x + ex, center.y + ey, center.z + ez);
+		// Raised elements stick out of the front.
+		double d = raised == null ? 0 : raised.height * width / pxWidth;
+		double nx = normal.x * d, ny = normal.y * d, nz = normal.z * d;
+		return new AABB(center.x - ex + Math.min(0, nx), center.y - ey + Math.min(0, ny), center.z - ez + Math.min(0, nz),
+				center.x + ex + Math.max(0, nx), center.y + ey + Math.max(0, ny), center.z + ez + Math.max(0, nz));
 	}
 }

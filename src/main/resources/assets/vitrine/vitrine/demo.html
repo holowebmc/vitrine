@@ -28,6 +28,19 @@
   body.world { background: #10162a; }
   body.world #panel { display: grid; width: auto; height: auto; margin: 0; border: 0; border-radius: 0; font-size: 20px; }
   body.world #closeBtn { display: none; }
+  /* Real 3D: buttons stand out of the panel and sink while pressed. */
+  body.world button { --vitrine-depth: 14px; transition: --vitrine-depth .08s; }
+  body.world button:active { --vitrine-depth: 3px; }
+  /* Solids take the element's shape: border-radius, clip-path; a raised child stands on its raised parent. */
+  .shapes { grid-column: 2; grid-row: 1; display: none; gap: 14px; align-items: center; }
+  body.world .shapes { display: flex; }
+  body.world h2 { grid-column: 1; }
+  .shapes button { width: 48px; height: 48px; padding: 0; font-size: 16px; }
+  .shapes .pill { width: 100px; height: 36px; border-radius: 18px; }
+  .shapes .round { border-radius: 50%; background: #38bdf8; }
+  .shapes .hex { clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); background: #a78bfa; }
+  .shapes .star { clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); background: #f472b6; }
+  .shapes .plate { --vitrine-depth: 10px; padding: 8px 12px; border-radius: 14px; background: #1e293b; border: 1px solid #475569; }
 </style>
 </head>
 <body>
@@ -76,6 +89,13 @@
       <button id="secBtn">Testar permissões</button>
       <input type="file" id="file" style="width:auto;margin-top:6px" title="não deve abrir o seletor do Windows">
       <pre id="sec" style="margin:6px 0 0;font-size:12px;white-space:pre-wrap"></pre>
+    </div>
+    <div class="shapes">
+      <button class="pill">Pílula</button>
+      <button class="round">●</button>
+      <button class="hex">⬡</button>
+      <button class="star">★</button>
+      <div class="plate"><button class="pill">Em cima</button></div>
     </div>
     <div class="hint">Esc devolve o foco ao jogo · F8 abre de novo</div>
   </div>

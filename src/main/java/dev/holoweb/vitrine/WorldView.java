@@ -9,6 +9,16 @@ import org.joml.Quaternionfc;
  * rotation and keeps the page's aspect. Players aim at it and click with the left button; clicking a text
  * field takes the keyboard until Esc. It costs nothing while hidden: beyond {@link #maxDistance}, outside
  * the view, or {@link #visible visible(false)}; and it renders at a lower frame rate when far.
+ *
+ * <p>The page can raise elements off the panel as real 3D solids with the CSS property
+ * {@code --vitrine-depth: <length>} (page pixels, same scale as the page): the element stands that far out of
+ * the panel, or out of the nearest raised element around it, and aiming follows it. The solid takes the
+ * element's shape: its {@code border-radius} (pills and circles included) or its {@code clip-path}
+ * ({@code polygon()}, {@code circle()}, {@code ellipse()}), cut where the page or a scrolling ancestor cuts it.
+ * It can be transitioned, e.g. a button that sinks while pressed:
+ * {@code button { --vitrine-depth: 12px; transition: --vitrine-depth .1s } button:active { --vitrine-depth: 3px }}.
+ * Elements only come out of the panel, never into it, and a CSS {@code transform} is not followed (the solid
+ * uses the element's bounding box).
  */
 public final class WorldView {
 	private final WorldPanel panel;

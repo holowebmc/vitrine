@@ -189,18 +189,72 @@ class View : public CefClient,
 
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefProcessId,
                                 CefRefPtr<CefProcessMessage> message) override {
-    if (message->GetName() != "vitrine.blur") return false;
+    bool depth = message->GetName() == "vitrine.depth";
+    if (!depth && message->GetName() != "vitrine.blur") return false;
+    size_t limit = depth ? 16384 : 10 * 64;  // pages are untrusted: bounded
     std::string text = message->GetArgumentList()->GetString(0).ToString();
     std::vector<float> rects;
-    for (const char* p = text.c_str(); *p && rects.size() < 10 * 64;) {  // pages are untrusted: bounded
+    for (const char* p = text.c_str(); *p && rects.size() < limit;) {
       char* end;
       rects.push_back(std::strtof(p, &end));
       if (end == p) break;
       p = *end == ',' ? end + 1 : end;
     }
-    rects.resize(rects.size() / 10 * 10);
     std::lock_guard lock(mu_);
-    blur_.swap(rects);
+    if (depth) {
+      // Variable length per element (Raised.java checks it), after a first number: did outlines move?
+      bool moved = rects.empty() || rects[0] != 0;
+      if (!rects.empty()) rects.erase(rects.begin());
+      bool waiting = depth_reported_ || depth_painted_;
+      if (!moved && !waiting) {
+        depth_.swap(rects);
+        depth_changed_ = true;
+      } else {
+        if (!waiting) depth_since_ = std::chrono::steady_clock::now();
+        depth_next_.swap(rects);
+        depth_reported_ = true;
+      }
+    } else {
+      rects.resize(rects.size() / 10 * 10);
+      blur_.swap(rects);
+    }
+    return true;
+  }
+
+  // The page reports outlines while it builds a frame, so they get here before that frame's pixels. Drawn at
+  // once, a moving element (scrolling) would show last frame's picture on this frame's solid. So outlines that
+  // moved wait: a paint marks them as on screen, and they become current when the game takes that frame.
+
+  /** CEF UI thread: a frame of the page was painted. */
+  void FramePainted() {
+    std::lock_guard lock(mu_);
+    if (!depth_reported_) return;
+    depth_ready_.swap(depth_next_);
+    depth_reported_ = false;
+    depth_painted_ = true;
+  }
+
+  /** Render thread: the game took the newest frame. */
+  void FrameTaken() {
+    std::lock_guard lock(mu_);
+    if (!depth_painted_) return;
+    depth_.swap(depth_ready_);
+    depth_painted_ = false;
+    depth_changed_ = true;
+    depth_since_ = std::chrono::steady_clock::now();  // for a report still waiting
+  }
+
+  /** The raised elements' outlines (see helper.cpp), once per report: false when the last answer still stands. */
+  bool TakeRaised(std::vector<float>& out) {
+    std::lock_guard lock(mu_);
+    if ((depth_reported_ || depth_painted_) && std::chrono::steady_clock::now() - depth_since_ > std::chrono::milliseconds(50)) {
+      depth_.swap(depth_reported_ ? depth_next_ : depth_ready_);  // its frame never came: stop waiting
+      depth_reported_ = depth_painted_ = false;
+      depth_changed_ = true;
+    }
+    if (!depth_changed_) return false;
+    depth_changed_ = false;
+    out = depth_;
     return true;
   }
 
@@ -255,6 +309,7 @@ class View : public CefClient,
     const uint8_t* src = static_cast<const uint8_t*>(buffer);
     if (type == PET_POPUP) cpu_.PaintPopup(src, bw, bh, popup);
     else cpu_.PaintView(src, bw, bh, dirty, popupShown, popup);
+    if (type == PET_VIEW) FramePainted();
   }
 
   // GPU path (shared_texture_enabled): CEF hands a D3D11 texture instead of pixels.
@@ -271,6 +326,7 @@ class View : public CefClient,
                   ? surface_.PaintPopup(info.shared_texture_handle, popup)
                   : surface_.PaintView(info.shared_texture_handle, popupShown, popup);
     if (!ok) gpu_failed_ = true;
+    if (type == PET_VIEW) FramePainted();
   }
 
   void OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) override {
@@ -412,6 +468,10 @@ class View : public CefClient,
   bool hidden_ = false, focused_ = false, closing_ = false, loaded_ = false;
   std::vector<std::string> messages_;
   std::vector<float> blur_;
+  // Raised outlines: current, painted but its frame not taken yet, reported but not painted yet.
+  std::vector<float> depth_, depth_ready_, depth_next_;
+  bool depth_changed_ = false, depth_painted_ = false, depth_reported_ = false;
+  std::chrono::steady_clock::time_point depth_since_;  // when the oldest waiting report started waiting
   CefRefPtr<CefBrowser> browser_;
   std::atomic<int> cursor_ = kArrow;
   std::atomic<bool> editable_ = false;
@@ -615,9 +675,9 @@ VITRINE(void, destroy)(JNIEnv*, jclass, jlong handle) {
 VITRINE(void, resize)(JNIEnv*, jclass, jlong handle, jint w, jint h) { AsView(handle)->Resize(w, h); }
 
 VITRINE(jboolean, copyIfDirty)(JNIEnv*, jclass, jlong handle, jlong dst, jlong size) {
-  return AsView(handle)->Cpu().CopyIfDirty(reinterpret_cast<uint8_t*>(dst), static_cast<size_t>(size))
-             ? JNI_TRUE
-             : JNI_FALSE;
+  if (!AsView(handle)->Cpu().CopyIfDirty(reinterpret_cast<uint8_t*>(dst), static_cast<size_t>(size))) return JNI_FALSE;
+  AsView(handle)->FrameTaken();
+  return JNI_TRUE;
 }
 
 VITRINE(void, send)(JNIEnv* env, jclass, jlong handle, jstring json) {
@@ -676,7 +736,9 @@ VITRINE(jboolean, gpuInit)(JNIEnv*, jclass) { return gpu::Init() ? JNI_TRUE : JN
 
 // Render thread. Copies the newest GPU frame into Minecraft's GL texture; false if none is new.
 VITRINE(jboolean, copyGpu)(JNIEnv*, jclass, jlong handle, jint glTexture, jint w, jint h) {
-  return AsView(handle)->Surface().CopyTo(static_cast<unsigned>(glTexture), w, h) ? JNI_TRUE : JNI_FALSE;
+  if (!AsView(handle)->Surface().CopyTo(static_cast<unsigned>(glTexture), w, h)) return JNI_FALSE;
+  AsView(handle)->FrameTaken();
+  return JNI_TRUE;
 }
 
 // Render thread. Vulkan backend: D3D11 on the adapter Minecraft's Vulkan device uses.
@@ -688,6 +750,7 @@ VITRINE(jboolean, gpuInitVulkan)(JNIEnv*, jclass, jlong luid) {
 VITRINE(jboolean, vkTake)(JNIEnv* env, jclass, jlong handle, jlongArray out) {
   gpu::VkFrame f;
   if (!AsView(handle)->Surface().VkTake(&f)) return JNI_FALSE;
+  AsView(handle)->FrameTaken();
   jlong v[5] = {f.slot, reinterpret_cast<jlong>(f.handle), f.generation, f.width, f.height};
   env->SetLongArrayRegion(out, 0, 5, v);
   return JNI_TRUE;
@@ -706,6 +769,16 @@ VITRINE(jboolean, gpuFailed)(JNIEnv*, jclass, jlong handle) {
 VITRINE(jfloatArray, blurRects)(JNIEnv* env, jclass, jlong handle) {
   std::vector<float> rects = AsView(handle)->BlurRects();
   if (rects.empty()) return nullptr;
+  jfloatArray out = env->NewFloatArray(static_cast<jsize>(rects.size()));
+  env->SetFloatArrayRegion(out, 0, static_cast<jsize>(rects.size()), rects.data());
+  return out;
+}
+
+// Outlines of the elements the page raises with --vitrine-depth, or null while they haven't changed
+// since the last call (so a page that raises nothing answers one empty array, then null).
+VITRINE(jfloatArray, raised)(JNIEnv* env, jclass, jlong handle) {
+  std::vector<float> rects;
+  if (!AsView(handle)->TakeRaised(rects)) return nullptr;
   jfloatArray out = env->NewFloatArray(static_cast<jsize>(rects.size()));
   env->SetFloatArrayRegion(out, 0, static_cast<jsize>(rects.size()), rects.data());
   return out;
