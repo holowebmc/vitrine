@@ -12,6 +12,9 @@ import org.joml.Quaternionfc;
  * {@code assets/<modid>/vitrine/<path>}. Java and the page talk in JSON strings: {@link ScreenView#send}
  * (Java to page) and {@link ScreenView#on} (page to Java, as a {@code fetch}).
  *
+ * <p>Game items as images (Minecraft 26.2+, while in a world): {@code <img src="vitrine://item/minecraft:chest">}
+ * is the item's inventory icon, modded items included; add {@code /128} for a size in pixels (default 64).
+ *
  * <p>Everything here runs on the render thread (client events, screens, key handlers). Views can be
  * created at any time, also while the engine is still downloading on first launch: a page starts
  * loading once {@link #isReady()}, and what you set or send before that is kept for it. On a system
