@@ -61,7 +61,7 @@ public final class WorldPanel {
 		this.pxWidth = pxWidth;
 		this.pxHeight = pxHeight;
 		//? if >=26.2
-		binds = new Binds(id.withSuffix("/binds"));
+		binds = new Binds(id.withSuffix("/binds"), url);
 		move(center, rotation, width);
 	}
 

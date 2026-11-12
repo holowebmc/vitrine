@@ -25,11 +25,13 @@ public final class ScreenPage {
 	private float volume = 1;
 	private boolean closed;
 	//? if >=26.2
-	private final Binds binds = new Binds(null);
+	private final Binds binds;
 
 	ScreenPage(String url, Identifier id) {
 		this.url = url;
 		this.id = id;
+		//? if >=26.2
+		binds = new Binds(null, url);
 	}
 
 	void start() {

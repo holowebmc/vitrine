@@ -43,6 +43,7 @@ final class Binds {
 	private static final long REDRAW_NANOS = 12_500_000;
 
 	private final Identifier textureId; // the target's name for world render types, or null (screen pages blit its view)
+	private final String url; // of the page, for Vitrine.Slot
 	private List<Slot> slots = List.of();
 	private boolean[] drawn = {}; // by slot index: its part of the target holds this frame's picture
 	private Target target; // while the page has slots
@@ -60,8 +61,9 @@ final class Binds {
 		void rect(Slot slot, int x0, int y0, int x1, int y1);
 	}
 
-	Binds(Identifier textureId) {
+	Binds(Identifier textureId, String url) {
 		this.textureId = textureId;
+		this.url = url;
 	}
 
 	static void register(String name, Vitrine.Bind bind) {
@@ -102,7 +104,7 @@ final class Binds {
 					pose.translate(slot.x + slot.w / 2f, slot.y + slot.h / 2f, 0);
 					pose.scale(1, 1, -1);
 					mc.gameRenderer.lighting().setupFor(Lighting.Entry.ENTITY_IN_UI);
-					bind.render(new Vitrine.Slot(slot.w, slot.h, slot.data), pose, nodes);
+					bind.render(new Vitrine.Slot(slot.w, slot.h, slot.data, url), pose, nodes);
 				});
 				drawn[i] = true;
 			} catch (RuntimeException e) {

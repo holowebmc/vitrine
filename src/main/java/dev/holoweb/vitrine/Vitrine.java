@@ -91,8 +91,14 @@ public final class Vitrine {
 	/**
 	 * One slot being drawn: its size in screen pixels, and the element's {@code data-vitrine} attribute ("" if
 	 * absent), for one bind to tell its slots apart (which entity, which item...). {@code data} comes from the page.
+	 * {@code page} is the URL its view was made with ({@code Vitrine.screen} / {@code world}), for a bind shared
+	 * by many pages to know whose slot this is.
 	 */
-	public record Slot(int width, int height, String data) {}
+	public record Slot(int width, int height, String data, String page) {
+		public Slot(int width, int height, String data) {
+			this(width, height, data, "");
+		}
+	}
 	//?}
 
 	/** Files for {@link #serve}: the bytes at {@code path} ({@code "index.html"}, {@code "img/logo.png"}), or null. */
