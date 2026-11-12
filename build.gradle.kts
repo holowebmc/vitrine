@@ -71,15 +71,17 @@ extensions.configure<JavaPluginExtension> {
 
 // Other mods depend on dev.holoweb:vitrine:<mod.version>+<mc> (one artifact per Minecraft build).
 // Only dev.holoweb.vitrine is API; dev.holoweb.vitrine.impl can change in any release.
-// Modrinth: ./gradlew :<mc>:modrinth with MODRINTH_TOKEN set uploads this build (players download it
-// there, and mods depend on maven.modrinth:holoweb-vitrine:<version>+<mc>). mod.mc_versions lists the versions
-// this jar runs on (same range as mod.mc_dep).
+// Modrinth: .github/workflows/release.yml runs ./gradlew modrinth on a v<mod.version> tag, so the files
+// there are always built by CI (players download them, and mods depend on
+// maven.modrinth:holoweb-vitrine:<version>+<mc>). mod.mc_versions lists the versions this jar runs on
+// (same range as mod.mc_dep).
 extensions.configure<ModrinthExtension> {
     token = providers.environmentVariable("MODRINTH_TOKEN")
     projectId = "holoweb-vitrine"
     versionNumber = project.version.toString()
     versionName = "Vitrine ${property("mod.version")} for Minecraft ${property("mod.mc_versions").toString().replace(",", ", ")}"
     versionType = "alpha"
+    System.getenv("MODRINTH_CHANGELOG")?.let { changelog = it } // CHANGELOG.md's section + the CI run, from the workflow
     uploadFile.set(tasks.named(if (obfuscated) "remapJar" else "jar"))
     gameVersions.addAll(property("mod.mc_versions").toString().split(","))
     loaders.add("fabric")
