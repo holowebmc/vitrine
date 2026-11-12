@@ -107,9 +107,9 @@ tasks {
             "minecraft" to project.property("mod.mc_dep"),
             "java" to java.majorVersion,
             "loader" to project.property("deps.fabric_loader"),
-            // Version-specific mixins: Vulkan zero-copy only on renderpearl; NativeImage pointer before 1.21.5.
+            // Version-specific mixins: Vulkan zero-copy and backdrop blur only on renderpearl; NativeImage pointer before 1.21.5.
             "extra_mixins" to buildList {
-                if (!preRenderpearl) addAll(listOf("VulkanFeatureSetsMixin", "VulkanCommandEncoderAccessor"))
+                if (!preRenderpearl) addAll(listOf("VulkanFeatureSetsMixin", "VulkanCommandEncoderAccessor", "GuiRendererMixin"))
                 if (below("1.21.5")) add("NativeImageAccessor")
             }.joinToString("") { ", \"$it\"" },
         )

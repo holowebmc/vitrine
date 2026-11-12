@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <style>
   html, body { margin: 0; height: 100%; background: transparent; font: 16px system-ui, sans-serif; color: #eef; }
-  .card { background: rgba(16, 22, 40, .82); border: 1px solid rgba(255,255,255,.15); border-radius: 10px; }
+  /* backdrop-filter: blur() blurs the game behind the page (screen pages). */
+  .card { background: rgba(16, 22, 40, .6); border: 1px solid rgba(255,255,255,.15); border-radius: 10px; backdrop-filter: blur(14px); }
   #hud { position: fixed; top: 16px; right: 16px; padding: 10px 16px; font-size: 22px; }
   #panel { position: fixed; inset: 0; margin: auto; width: 760px; height: 660px; padding: 20px 28px;
            display: none; grid-template-columns: 1fr 1fr; gap: 16px 24px; box-sizing: border-box; }
   body.focused #panel { display: grid; }
-  body.focused { background: rgba(0, 0, 0, .35); }
+  body.focused { background: rgba(0, 0, 0, .35); backdrop-filter: blur(3px); }
   h2 { grid-column: 1 / -1; margin: 0; }
   label { display: block; font-size: 13px; opacity: .7; margin-bottom: 4px; }
   input, textarea, select { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; border-radius: 6px;

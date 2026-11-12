@@ -102,6 +102,10 @@ public final class ScreenPage {
 
 	void draw(GuiGraphicsExtractor gui) {
 		if (visible && browser != null && browser.hasFrame()) {
+			//? if >=26.2 {
+			float[] blur = Native.blurRects(browser.handle); // backdrop-filter: blur() shows the game, blurred
+			if (blur != null) GameBlur.draw(gui, blur);
+			//?}
 			//? if >=1.21.6 {
 			gui.blit(browser.textureId, 0, 0, gui.guiWidth(), gui.guiHeight(), 0, 1, 0, 1);
 			//?} else if >=1.21.2 {

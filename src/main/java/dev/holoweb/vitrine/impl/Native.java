@@ -48,6 +48,12 @@ public final class Native {
 	/** The page's shared textures could not be opened; recreate it with CPU frames. */
 	public static native boolean gpuFailed(long handle);
 
+	/**
+	 * Where the page has {@code backdrop-filter: blur()}, 10 floats per element in page pixels:
+	 * x, y, width, height, blur radius, corner radii (TL, TR, BR, BL), opacity. Null when there is none.
+	 */
+	public static native float[] blurRects(long handle);
+
 	/** Sample rate of the page's current audio stream, 0 while it is silent. */
 	public static native int audioRate(long handle);
 

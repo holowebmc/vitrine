@@ -72,6 +72,8 @@ public final class Pages {
 
 	/** Start of every client frame (mixin): answer page requests, turn billboards, pull new frames into textures. */
 	public static void frame() {
+		//? if >=26.2
+		GameBlur.newFrame();
 		if (!ready) {
 			VitrineClient.startIfLoaded();
 			return;

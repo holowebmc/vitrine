@@ -12,6 +12,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <memory>
@@ -179,6 +180,31 @@ class View : public CefClient,
   bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request,
                       bool, bool) override {
     return request->GetURL().ToString().rfind("file:", 0) == 0;  // true = cancel
+  }
+
+  // --- backdrop-filter: blur() rects, reported by the page's renderer (helper.cpp) ---
+
+  bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefProcessId,
+                                CefRefPtr<CefProcessMessage> message) override {
+    if (message->GetName() != "vitrine.blur") return false;
+    std::string text = message->GetArgumentList()->GetString(0).ToString();
+    std::vector<float> rects;
+    for (const char* p = text.c_str(); *p && rects.size() < 10 * 64;) {  // pages are untrusted: bounded
+      char* end;
+      rects.push_back(std::strtof(p, &end));
+      if (end == p) break;
+      p = *end == ',' ? end + 1 : end;
+    }
+    rects.resize(rects.size() / 10 * 10);
+    std::lock_guard lock(mu_);
+    blur_.swap(rects);
+    return true;
+  }
+
+  /** 10 floats per rect (see helper.cpp); empty when the page blurs nothing. */
+  std::vector<float> BlurRects() {
+    std::lock_guard lock(mu_);
+    return blur_;
   }
 
   // --- Java -> JS messages, held until the page has finished loading ---
@@ -420,6 +446,7 @@ class View : public CefClient,
   bool popup_shown_ = false;
   bool dirty_ = false, hidden_ = false, focused_ = false, closing_ = false, loaded_ = false;
   std::vector<std::string> messages_;
+  std::vector<float> blur_;
   CefRefPtr<CefBrowser> browser_;
   std::atomic<int> cursor_ = kArrow;
   std::atomic<bool> editable_ = false;
@@ -814,6 +841,15 @@ VITRINE(void, vkRelease)(JNIEnv*, jclass, jlong handle, jint slot, jint generati
 // The page's shared textures could not be opened (e.g. CEF on another GPU): switch it to CPU frames.
 VITRINE(jboolean, gpuFailed)(JNIEnv*, jclass, jlong handle) {
   return AsView(handle)->GpuFailed() ? JNI_TRUE : JNI_FALSE;
+}
+
+// backdrop-filter: blur() rects of the page (10 floats each), or null when there are none.
+VITRINE(jfloatArray, blurRects)(JNIEnv* env, jclass, jlong handle) {
+  std::vector<float> rects = AsView(handle)->BlurRects();
+  if (rects.empty()) return nullptr;
+  jfloatArray out = env->NewFloatArray(static_cast<jsize>(rects.size()));
+  env->SetFloatArrayRegion(out, 0, static_cast<jsize>(rects.size()), rects.data());
+  return out;
 }
 
 VITRINE(jint, audioRate)(JNIEnv*, jclass, jlong handle) { return AsView(handle)->AudioRate(); }
