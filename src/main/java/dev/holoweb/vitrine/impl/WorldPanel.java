@@ -52,7 +52,6 @@ public final class WorldPanel {
 	private float maxDistance = 64;
 	private float volume = 1, audioRange = 24;
 	private boolean visible = true, shown = true, closed;
-	//? if >=26.2
 	private final Binds binds; // --vitrine-bind slots, drawn by the game
 
 	WorldPanel(String url, int pxWidth, int pxHeight, Vec3 center, Quaternionfc rotation, float width, Identifier id) {
@@ -60,7 +59,6 @@ public final class WorldPanel {
 		this.id = id;
 		this.pxWidth = pxWidth;
 		this.pxHeight = pxHeight;
-		//? if >=26.2
 		binds = new Binds(id.withSuffix("/binds"), url);
 		move(center, rotation, width);
 	}
@@ -126,7 +124,6 @@ public final class WorldPanel {
 		closed = true;
 		Pages.remove(this);
 		if (browser != null) browser.release();
-		//? if >=26.2
 		binds.close();
 	}
 
@@ -181,7 +178,6 @@ public final class WorldPanel {
 		browser.update();
 		float[] report = Native.raised(browser.handle); // null: same as before
 		if (report != null) raised = Raised.of(report);
-		//? if >=26.2
 		binds.render(browser.handle, pxWidth, pxHeight);
 	}
 
@@ -199,14 +195,27 @@ public final class WorldPanel {
 	void submit(SubmitNodeCollector collector, PoseStack poseStack) {
 		if (!shown || browser == null || !browser.hasFrame()) return;
 		collector.submitCustomGeometry(poseStack, RenderTypes.text(browser.textureId), this::quad);
-		//? if >=26.2 {
 		Identifier slots = binds.texture();
 		// After the page: drawn first, a see-through slot would keep the page behind it from being drawn at all.
 		if (slots != null) collector.order(1).submitCustomGeometry(poseStack, RenderTypes.text(slots), this::slots);
-		//?}
+	}
+	//?} else {
+	/*// Before 1.21.9 level rendering draws immediately, with the given camera pose.
+	void submit(MultiBufferSource buffers, PoseStack.Pose pose) {
+		if (!shown || browser == null || !browser.hasFrame()) return;
+		if (renderType == null) renderType = PanelRenderType.of(browser.textureId);
+		quad(pose, buffers.getBuffer(renderType));
+		Identifier slots = binds.texture();
+		if (slots == null) return;
+		if (slotsType == null) slotsType = PanelRenderType.of(slots);
+		// After the page: drawn first, a see-through slot would keep the page behind it from being drawn at all.
+		if (buffers instanceof MultiBufferSource.BufferSource batch) batch.endBatch(renderType);
+		slots(pose, buffers.getBuffer(slotsType));
 	}
 
-	//? if >=26.2 {
+	private net.minecraft.client.renderer.RenderType renderType, slotsType;
+	*///?}
+
 	/**
 	 * The slots, just over the page, showing their part of the binds' texture (bottom-up, as render targets are).
 	 * ponytail: flat on the page, so a slot on an element raised with --vitrine-depth is inside its solid; and the
@@ -214,7 +223,7 @@ public final class WorldPanel {
 	 */
 	private void slots(PoseStack.Pose pose, VertexConsumer vc) {
 		binds.cover((slot, x0, y0, x1, y1) -> {
-			int alpha = Math.round(Math.clamp(slot.opacity(), 0, 1) * 255);
+			int alpha = Math.round(Math.max(0, Math.min(slot.opacity(), 1)) * 255);
 			point(pose, vc, x0, y0, SLOT_LIFT, 255, alpha, x0, pxHeight - y0);
 			point(pose, vc, x0, y1, SLOT_LIFT, 255, alpha, x0, pxHeight - y1);
 			point(pose, vc, x1, y1, SLOT_LIFT, 255, alpha, x1, pxHeight - y1);
@@ -223,17 +232,6 @@ public final class WorldPanel {
 	}
 
 	private static final float SLOT_LIFT = 1; // page pixels over the page: enough not to fight it for depth
-	//?}
-	//?} else {
-	/*// Before 1.21.9 level rendering draws immediately, with the given camera pose.
-	void submit(MultiBufferSource buffers, PoseStack.Pose pose) {
-		if (!shown || browser == null || !browser.hasFrame()) return;
-		if (renderType == null) renderType = PanelRenderType.of(browser.textureId);
-		quad(pose, buffers.getBuffer(renderType));
-	}
-
-	private net.minecraft.client.renderer.RenderType renderType;
-	*///?}
 
 	private void quad(PoseStack.Pose pose, VertexConsumer vc) {
 		// Each face counter-clockwise seen from outside; the page itself: top-left, bottom-left, bottom-right, top-right.

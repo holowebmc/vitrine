@@ -33,11 +33,9 @@ public final class Pages {
 		Bridge.serve(host, files);
 	}
 
-	//? if >=26.2 {
 	public static void bind(String name, dev.holoweb.vitrine.Vitrine.Bind bind) {
 		Binds.register(name, bind);
 	}
-	//?}
 
 	/** A page created before CEF is up starts loading once it is. */
 	public static ScreenPage screen(String url) {
@@ -78,7 +76,6 @@ public final class Pages {
 
 	/** Start of every client frame (mixin): answer page requests, turn billboards, pull new frames into textures. */
 	public static void frame() {
-		//? if >=26.2
 		GameBlur.newFrame();
 		if (!ready) {
 			VitrineClient.startIfLoaded();

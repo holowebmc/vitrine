@@ -1,6 +1,6 @@
 package dev.holoweb.vitrine.impl.mixin;
 
-//? if >=26.2 {
+//? if >=1.21.6 {
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import dev.holoweb.vitrine.impl.GameBlur;

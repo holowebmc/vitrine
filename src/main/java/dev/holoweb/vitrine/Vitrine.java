@@ -12,10 +12,10 @@ import org.joml.Quaternionfc;
  * {@code assets/<modid>/vitrine/<path>}. Java and the page talk in JSON strings: {@link ScreenView#send}
  * (Java to page) and {@link ScreenView#on} (page to Java, as a {@code fetch}).
  *
- * <p>Game items as images (Minecraft 26.2+, while in a world): {@code <img src="vitrine://item/minecraft:chest">}
+ * <p>Game items as images (while in a world): {@code <img src="vitrine://item/minecraft:chest">}
  * is the item's inventory icon, modded items included; add {@code /128} for a size in pixels (default 64).
  *
- * <p>Game rendering in a page (Minecraft 26.2+): see {@code bind}.
+ * <p>Game rendering in a page: see {@code bind}.
  *
  * <p>Everything here runs on the render thread (client events, screens, key handlers). Views can be
  * created at any time, also while the engine is still downloading on first launch: a page starts
@@ -53,7 +53,6 @@ public final class Vitrine {
 		Pages.serve(host, files);
 	}
 
-	//? if >=26.2 {
 	/**
 	 * Fills the slots that screen pages leave for {@code name} with something the game draws: an element with
 	 * {@code --vitrine-bind: <name>} in its CSS (e.g. {@code <div style="--vitrine-bind: mymod:preview">}) is a slot.
@@ -84,8 +83,13 @@ public final class Vitrine {
 		 * {@code pose} has its origin at the centre of the slot, one unit per screen pixel, y down, and the
 		 * lighting is the inventory's ({@code Lighting.Entry.ENTITY_IN_UI}; set another if you need). Scale it
 		 * to taste, e.g. {@code pose.scale(s, s, s)} then an entity as {@code InventoryScreen} submits it.
+		 * Before Minecraft 1.21.9 {@code nodes} is a {@code MultiBufferSource} to render into (as item and entity
+		 * renderers do), and before 1.21.6 the lighting is {@code Lighting.setupForEntityInInventory()}.
 		 */
+		//? if >=1.21.9 {
 		void render(Slot slot, com.mojang.blaze3d.vertex.PoseStack pose, net.minecraft.client.renderer.SubmitNodeCollector nodes);
+		//?} else
+		/*void render(Slot slot, com.mojang.blaze3d.vertex.PoseStack pose, net.minecraft.client.renderer.MultiBufferSource nodes);*/
 	}
 
 	/**
@@ -99,7 +103,6 @@ public final class Vitrine {
 			this(width, height, data, "");
 		}
 	}
-	//?}
 
 	/** Files for {@link #serve}: the bytes at {@code path} ({@code "index.html"}, {@code "img/logo.png"}), or null. */
 	@FunctionalInterface

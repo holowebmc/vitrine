@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>GET {@code vitrine://<host>/<path>} serves the files {@link Vitrine#serve} registered for the host,
  *   else {@code assets/<host>/vitrine/<path>} from the classpath.</li>
- *   <li>GET {@code vitrine://item/<namespace:item>[/<pixels>]} is that item's inventory icon as a PNG (26.2+).</li>
+ *   <li>GET {@code vitrine://item/<namespace:item>[/<pixels>]} is that item's inventory icon as a PNG.</li>
  *   <li>POST {@code vitrine://<modid>/<name>} calls the page's handler {@code <name>} (vitrine:// pages only).</li>
  * </ul>
  */
@@ -72,12 +72,10 @@ final class Bridge {
 		}
 
 		String file = path.startsWith("/") ? path.substring(1) : path;
-		//? if >=26.2 {
 		if (host.equals("item")) {
 			ItemIcons.serve(id, file);
 			return;
 		}
-		//?}
 		if (file.isEmpty() || file.endsWith("/")) file += "index.html";
 		if (file.contains("..") || file.contains("\\") || host.isEmpty()) {
 			text(id, 400, "bad path");

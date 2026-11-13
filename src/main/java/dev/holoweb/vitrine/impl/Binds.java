@@ -1,14 +1,7 @@
 package dev.holoweb.vitrine.impl;
 
-//? if >=26.2 {
 import com.mojang.blaze3d.platform.Lighting;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.renderpearl.api.GpuFormat;
-import com.mojang.renderpearl.api.device.GpuDevice;
-import com.mojang.renderpearl.api.textures.FilterMode;
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
 import dev.holoweb.vitrine.Vitrine;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -17,13 +10,25 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.render.TextureSetup;
-import net.minecraft.client.renderer.ProjectionMatrixBuffer;
-import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.client.renderer.state.gui.BlitRenderState;
-import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.resources.Identifier;
+//? if >=1.21.6 {
+import net.minecraft.client.gui.render.TextureSetup;
+import net.minecraft.client.renderer.RenderPipelines;
 import org.joml.Matrix3x2f;
+//?}
+//? if >=26.1 {
+import net.minecraft.client.renderer.state.gui.BlitRenderState;
+//?} else if >=1.21.6
+/*import net.minecraft.client.gui.render.state.BlitRenderState;*/
+//? if >=1.21.11 {
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.renderpearl.api.textures.FilterMode;
+//?} else if >=1.21.2 <1.21.6 {
+/*import net.minecraft.client.renderer.RenderType;
+*///?} else if <1.21.2 {
+/*import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.systems.RenderSystem;
+*///?}
 
 /**
  * The slots one page leaves for the game ({@code --vitrine-bind}, see helper.cpp): each is drawn by its
@@ -42,11 +47,11 @@ final class Binds {
 	 */
 	private static final long REDRAW_NANOS = 12_500_000;
 
-	private final Identifier textureId; // the target's name for world render types, or null (screen pages blit its view)
+	private final Identifier textureId; // the target as a texture: world panels draw it by name (and screen pages before 1.21.6)
 	private final String url; // of the page, for Vitrine.Slot
 	private List<Slot> slots = List.of();
 	private boolean[] drawn = {}; // by slot index: its part of the target holds this frame's picture
-	private Target target; // while the page has slots
+	private Offscreen target; // the size of the page, while it has slots
 	private long drawnAt; // System.nanoTime() of the last draw
 
 	/**
@@ -83,27 +88,33 @@ final class Binds {
 			return;
 		}
 		Minecraft mc = Minecraft.getInstance();
-		if (target == null) target = new Target();
-		boolean fresh = target.size(width, height, textureId);
+		boolean fresh = target == null || target.width != width || target.height != height;
+		if (fresh) {
+			close();
+			target = new Offscreen("Vitrine bind", width, height, true); // world panels are scaled
+			if (textureId != null) mc.getTextureManager().register(textureId, target);
+		}
 		long now = System.nanoTime();
 		if (report == null && !fresh && now - drawnAt < REDRAW_NANOS) return; // what is in the target still stands
 		drawnAt = now;
 		// ponytail: one depth buffer for all, so slots that overlap on the page cut into each other.
-		Offscreen.clear(target.color, target.depth);
+		target.clear();
 		for (int i = 0; i < slots.size(); i++) {
 			Slot slot = slots.get(i);
 			drawn[i] = false;
 			Vitrine.Bind bind = REGISTRY.get(slot.name);
-			int x1 = Math.min(slot.x1, target.w), y1 = Math.min(slot.y1, target.h);
+			int x1 = Math.min(slot.x1, target.width), y1 = Math.min(slot.y1, target.height);
 			if (bind == null || x1 <= slot.x0 || y1 <= slot.y0) continue;
 			try {
-				Offscreen.draw(target.color, target.colorView, target.depth, target.depthView, target.projection, target.w, target.h,
-						slot.x0, slot.y0, x1 - slot.x0, y1 - slot.y0, nodes -> {
+				target.draw(slot.x0, slot.y0, x1 - slot.x0, y1 - slot.y0, nodes -> {
 					// As PictureInPictureRenderer.prepare with scale 1: origin at the centre, y down, z towards the viewer flipped.
 					PoseStack pose = new PoseStack();
 					pose.translate(slot.x + slot.w / 2f, slot.y + slot.h / 2f, 0);
 					pose.scale(1, 1, -1);
+					//? if >=1.21.6 {
 					mc.gameRenderer.lighting().setupFor(Lighting.Entry.ENTITY_IN_UI);
+					//?} else
+					/*Lighting.setupForEntityInInventory();*/
 					bind.render(new Vitrine.Slot(slot.w, slot.h, slot.data, url), pose, nodes);
 				});
 				drawn[i] = true;
@@ -127,7 +138,7 @@ final class Binds {
 	 */
 	void cover(Rects out) {
 		if (target == null) return;
-		for (int i = 0; i < slots.size(); i++) if (drawn[i]) cover(slots.get(i), target.w, target.h, out);
+		for (int i = 0; i < slots.size(); i++) if (drawn[i]) cover(slots.get(i), target.width, target.height, out);
 	}
 
 	static void cover(Slot s, int width, int height, Rects out) {
@@ -151,24 +162,61 @@ final class Binds {
 	void draw(GuiGraphicsExtractor gui) {
 		if (slots.isEmpty() || target == null) return;
 		var window = Minecraft.getInstance().getWindow();
+		//? if >=1.21.6 {
 		gui.pose().pushMatrix();
 		gui.pose().scale((float) gui.guiWidth() / window.getWidth(), (float) gui.guiHeight() / window.getHeight()); // work in framebuffer pixels
 		// One texture, so the GUI draws all the slots in one batch.
+		//? if >=1.21.11 {
 		TextureSetup texture = TextureSetup.singleTexture(target.colorView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+		//?} else
+		/*TextureSetup texture = TextureSetup.singleTexture(target.colorView);*/
 		Matrix3x2f pose = new Matrix3x2f(gui.pose());
-		float w = target.w, h = target.h;
+		float w = target.width, h = target.height;
 		var scissor = gui.scissorStack.peek();
 		cover((s, x0, y0, x1, y1) -> {
-			int a = Math.round(Math.clamp(s.opacity, 0, 1) * 255);
+			int a = Math.round(Math.max(0, Math.min(s.opacity, 1)) * 255);
 			// The texture is premultiplied (drawn over transparent) and bottom-up (render targets are).
-			gui.guiRenderState.addBlitToCurrentLayer(new BlitRenderState(RenderPipelines.GUI_TEXTURED_PREMULTIPLIED_ALPHA, texture, pose,
-					x0, y0, x1, y1, x0 / w, x1 / w, 1 - y0 / h, 1 - y1 / h, a << 24 | a << 16 | a << 8 | a, scissor));
+			var blit = new BlitRenderState(RenderPipelines.GUI_TEXTURED_PREMULTIPLIED_ALPHA, texture, pose,
+					x0, y0, x1, y1, x0 / w, x1 / w, 1 - y0 / h, 1 - y1 / h, a << 24 | a << 16 | a << 8 | a, scissor);
+			//? if >=26.1 {
+			gui.guiRenderState.addBlitToCurrentLayer(blit);
+			//?} else
+			/*gui.guiRenderState.submitBlitToCurrentLayer(blit);*/
 		});
 		gui.pose().popMatrix();
+		//?} else {
+		/*gui.flush(); // the page first: its batch and ours are drawn in no set order
+		gui.pose().pushPose();
+		gui.pose().scale((float) gui.guiWidth() / window.getWidth(), (float) gui.guiHeight() / window.getHeight(), 1); // work in framebuffer pixels
+		int w = target.width, h = target.height;
+		//? if <1.21.2 {
+		RenderSystem.enableBlend();
+		RenderSystem.blendFunc(GlStateManager.SourceFactor.ONE, GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA); // premultiplied
+		//?}
+		cover((s, x0, y0, x1, y1) -> {
+			float a = Math.max(0, Math.min(s.opacity, 1));
+			// The texture is bottom-up: v from the bottom, a negative height flips it.
+			//? if >=1.21.2 {
+			// ponytail: the GUI's straight-alpha blending of a premultiplied texture: see-through edges of a model come out darker.
+			gui.blit(RenderType::guiTextured, textureId, x0, y0, x0, h - y0, x1 - x0, y1 - y0, x1 - x0, y0 - y1, w, h, Math.round(a * 255) << 24 | 0xFFFFFF);
+			//?} else {
+			RenderSystem.setShaderColor(a, a, a, a);
+			gui.blit(textureId, x0, y0, x1 - x0, y1 - y0, x0, h - y0, x1 - x0, y0 - y1, w, h);
+			//?}
+		});
+		//? if <1.21.2 {
+		RenderSystem.setShaderColor(1, 1, 1, 1);
+		RenderSystem.defaultBlendFunc();
+		RenderSystem.disableBlend();
+		//?}
+		gui.pose().popPose();
+		*///?}
 	}
 
 	void close() {
-		if (target != null) target.free(textureId);
+		if (target == null) return;
+		if (textureId != null) Minecraft.getInstance().getTextureManager().release(textureId);
+		target.free();
 		target = null;
 	}
 
@@ -198,53 +246,6 @@ final class Binds {
 		return out;
 	}
 
-	/** Colour and depth, the size of the page. A texture by name too, for world render types. */
-	private static final class Target extends AbstractTexture {
-		final ProjectionMatrixBuffer projection = new ProjectionMatrixBuffer("Vitrine bind");
-		GpuTexture color, depth;
-		GpuTextureView colorView, depthView;
-		int w, h;
-
-		/** True if the textures are new (and empty). */
-		boolean size(int w, int h, Identifier id) {
-			if (color != null && this.w == w && this.h == h) return false;
-			release();
-			GpuDevice device = RenderSystem.getDevice();
-			color = device.createTexture("Vitrine bind", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, w, h, 1, 1);
-			depth = device.createTexture("Vitrine bind depth", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_DST, GpuFormat.D32_FLOAT, w, h, 1, 1);
-			colorView = device.createTextureView(color);
-			depthView = device.createTextureView(depth);
-			this.w = w;
-			this.h = h;
-			if (id != null) {
-				texture = color;
-				textureView = colorView;
-				sampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR); // panels are scaled
-				Minecraft.getInstance().getTextureManager().register(id, this);
-			}
-			return true;
-		}
-
-		private void release() {
-			if (color == null) return;
-			colorView.close();
-			depthView.close();
-			color.close();
-			depth.close();
-			color = null;
-		}
-
-		void free(Identifier id) {
-			if (id != null && color != null) Minecraft.getInstance().getTextureManager().release(id);
-			release();
-			projection.close();
-		}
-
-		@Override
-		public void close() {
-			// we own the textures; the texture manager must not free them
-		}
-	}
 
 	/** Self-check of the parser and the shapes, run by hand with the game on the classpath. */
 	public static void main(String[] args) {
@@ -270,4 +271,3 @@ final class Binds {
 		System.out.println("Binds ok");
 	}
 }
-//?}

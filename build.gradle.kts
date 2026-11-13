@@ -22,6 +22,15 @@ stonecutter.replacements {
 
     rename("26.2", "com.mojang.renderpearl.api.textures", "com.mojang.blaze3d.textures")
     rename("26.2", "com.mojang.renderpearl.backend.opengl", "com.mojang.blaze3d.opengl")
+    rename("26.2", "com.mojang.renderpearl.api.buffers.GpuBuffer;", "com.mojang.blaze3d.buffers.GpuBuffer;") // not the package: Std140Builder stays in blaze3d
+    rename("26.2", "com.mojang.renderpearl.api.device.GpuDevice", "com.mojang.blaze3d.systems.GpuDevice")
+    rename("26.2", "com.mojang.renderpearl.api.commands.RenderPass", "com.mojang.blaze3d.systems.RenderPass")
+    rename("26.2", "com.mojang.renderpearl.api.commands.CommandEncoder", "com.mojang.blaze3d.systems.CommandEncoder")
+    rename("26.2", "com.mojang.renderpearl.api.pipeline.RenderPipeline", "com.mojang.blaze3d.pipeline.RenderPipeline")
+    rename("26.2", "com.mojang.renderpearl.api.pipeline.UniformType", "com.mojang.blaze3d.shaders.UniformType")
+    rename("26.2", "gameRenderer.lighting()", "gameRenderer.getLighting()")
+    rename("26.2", "pose.rotate(new Quaternionf()", "pose.mulPose(new Quaternionf()")
+    rename("26.2", "gameRenderer.mainRenderTarget()", "getMainRenderTarget()")
     rename("26.1", "net.minecraft.util.LightCoordsUtil;", "net.minecraft.client.renderer.LightTexture;")
     rename("26.1", "LightCoordsUtil.FULL_BRIGHT", "LightTexture.FULL_BRIGHT")
     rename("26.1", "client.keymapping.v1.KeyMappingHelper", "client.keybinding.v1.KeyBindingHelper")
@@ -61,6 +70,8 @@ loom.runConfigs.configureEach {
     // -PcpuFrames tests the CPU fallback (frames copied and uploaded) instead of zero-copy GPU frames.
     if (project.hasProperty("cpuFrames")) property("vitrine.gpu", "false")
     property("vitrine.demo", "true") // F8/F9 demo pages; off for mods that depend on Vitrine
+    // -Pgallery: the demo keys show the pages the Modrinth gallery is shot from (branding/gallery).
+    if (project.hasProperty("gallery")) property("vitrine.demoDir", rootProject.file("branding/gallery").absolutePath)
 }
 
 extensions.configure<JavaPluginExtension> {
@@ -109,9 +120,10 @@ tasks {
             "minecraft" to project.property("mod.mc_dep"),
             "java" to java.majorVersion,
             "loader" to project.property("deps.fabric_loader"),
-            // Version-specific mixins: Vulkan zero-copy and backdrop blur only on renderpearl; NativeImage pointer before 1.21.5.
+            // Version-specific mixins: Vulkan zero-copy only on renderpearl; backdrop blur in the GUI renderer (1.21.6+) or our offscreen target as the main one (before); NativeImage pointer before 1.21.5.
             "extra_mixins" to buildList {
-                if (!preRenderpearl) addAll(listOf("VulkanFeatureSetsMixin", "VulkanCommandEncoderAccessor", "GuiRendererMixin"))
+                if (!preRenderpearl) addAll(listOf("VulkanFeatureSetsMixin", "VulkanCommandEncoderAccessor"))
+                add(if (below("1.21.6")) "MainTargetMixin" else "GuiRendererMixin")
                 if (below("1.21.5")) add("NativeImageAccessor")
             }.joinToString("") { ", \"$it\"" },
         )

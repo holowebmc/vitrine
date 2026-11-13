@@ -1,15 +1,6 @@
 package dev.holoweb.vitrine.impl;
 
-//? if >=26.2 {
-import com.mojang.blaze3d.platform.Lighting;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.renderpearl.api.GpuFormat;
-import com.mojang.renderpearl.api.buffers.GpuBuffer;
-import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
-import com.mojang.renderpearl.api.device.GpuDevice;
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
@@ -18,25 +9,21 @@ import java.util.Map;
 import java.util.function.Consumer;
 import javax.imageio.ImageIO;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.ProjectionMatrixBuffer;
-import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 
 /**
  * {@code vitrine://item/<namespace:item>[/<pixels>]}: an item as the inventory draws it, as a PNG any page
  * can put in an {@code <img>}. Drawn once by the game's own item renderer (so blocks and modded items look
- * like they do in a slot), the way {@code GuiItemAtlas} fills its slots, then read back.
+ * like they do in a slot), the way the GUI item atlas fills its slots, then read back.
  */
 final class ItemIcons {
 	private static final int DEFAULT_SIZE = 64, MAX_SIZE = 512;
 	// ponytail: never invalidated; clear it on resource reload if packs changing item models mid-game matters.
 	private static final Map<String, byte[]> CACHE = new HashMap<>();
 	private static final PoseStack POSE = new PoseStack();
-	private static ProjectionMatrixBuffer projectionBuffer;
 
 	private ItemIcons() {}
 
@@ -56,7 +43,7 @@ final class ItemIcons {
 		int slash = path.lastIndexOf('/');
 		if (slash >= 0 && path.substring(slash + 1).matches("\\d{1,4}")) {
 			name = path.substring(0, slash);
-			size = Math.clamp(Integer.parseInt(path.substring(slash + 1)), 1, MAX_SIZE);
+			size = Math.max(1, Math.min(Integer.parseInt(path.substring(slash + 1)), MAX_SIZE));
 		}
 		Identifier key = Identifier.tryParse(name);
 		Item item = key == null ? null : BuiltInRegistries.ITEM.getOptional(key).orElse(null);
@@ -74,52 +61,33 @@ final class ItemIcons {
 		});
 	}
 
-	/** Draws {@code stack} filling a {@code size}² texture; {@code done} gets the PNG (null on failure) once the GPU hands the pixels back. */
+	/** Draws {@code stack} filling a {@code size}² target; {@code done} gets the PNG (null on failure) once the GPU hands the pixels back. */
 	private static void render(ItemStack stack, int size, Consumer<byte[]> done) {
-		Minecraft mc = Minecraft.getInstance();
-		ItemStackRenderState state = new ItemStackRenderState();
-		mc.getItemModelResolver().updateForTopItem(state, stack, ItemDisplayContext.GUI, mc.level, mc.player, 0);
-
-		GpuDevice device = RenderSystem.getDevice();
-		GpuTexture color = device.createTexture("Vitrine item", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_COPY_DST, GpuFormat.RGBA8_UNORM, size, size, 1, 1);
-		GpuTexture depth = device.createTexture("Vitrine item depth", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_DST, GpuFormat.D32_FLOAT, size, size, 1, 1);
-		GpuTextureView colorView = device.createTextureView(color), depthView = device.createTextureView(depth);
-		GpuBuffer pixels = device.createBuffer(() -> "Vitrine item pixels", GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, (long) size * size * 4);
-		Runnable free = () -> {
-			pixels.close();
-			colorView.close();
-			depthView.close();
-			color.close();
-			depth.close();
-		};
+		Offscreen target = new Offscreen("Vitrine item", size, size, false);
 		try {
-			// Same setup as GuiItemAtlas.drawToSlot, with the one slot being the whole texture.
-			if (projectionBuffer == null) projectionBuffer = new ProjectionMatrixBuffer("Vitrine items");
-			Offscreen.clear(color, depth);
-			Offscreen.draw(color, colorView, depth, depthView, projectionBuffer, size, size, 0, 0, size, size, nodes -> {
+			// As the GUI item atlas draws a slot, with the one slot being the whole target.
+			target.draw(0, 0, size, size, nodes -> {
 				POSE.pushPose();
 				POSE.translate(size / 2f, size / 2f, 0);
 				POSE.scale(size, -size, size);
-				mc.gameRenderer.lighting().setupFor(state.usesBlockLight() ? Lighting.Entry.ITEMS_3D : Lighting.Entry.ITEMS_FLAT);
 				try {
-					state.submit(POSE, nodes, 0xF000F0, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, 0);
+					BuiltinBinds.item(stack, POSE, nodes);
 				} finally {
 					POSE.popPose();
 				}
 			});
-
-			device.createCommandEncoder().copyTextureToBuffer(color, pixels, 0, () -> {
+			target.read(rgba -> {
 				byte[] png = null;
-				try (GpuBufferSlice.MappedView view = pixels.map(true, false)) {
-					png = png(view.data(), size);
+				try {
+					if (rgba != null) png = png(rgba, size);
 				} catch (Exception e) {
-					VitrineClient.LOG.error("Vitrine: item icon readback failed", e);
+					VitrineClient.LOG.error("Vitrine: item icon not encoded", e);
 				}
-				free.run();
+				target.free();
 				done.accept(png);
-			}, 0);
+			});
 		} catch (RuntimeException e) {
-			free.run();
+			target.free();
 			throw e;
 		}
 	}
@@ -138,4 +106,3 @@ final class ItemIcons {
 		return out.toByteArray();
 	}
 }
-//?}

@@ -24,14 +24,12 @@ public final class ScreenPage {
 	private boolean visible = true, wantsFocus;
 	private float volume = 1;
 	private boolean closed;
-	//? if >=26.2
 	private final Binds binds;
 
 	ScreenPage(String url, Identifier id) {
 		this.url = url;
 		this.id = id;
-		//? if >=26.2
-		binds = new Binds(null, url);
+		binds = new Binds(id.withSuffix("/binds"), url);
 	}
 
 	void start() {
@@ -93,7 +91,6 @@ public final class ScreenPage {
 		closed = true;
 		Pages.remove(this);
 		if (browser != null) browser.release();
-		//? if >=26.2
 		binds.close();
 	}
 
@@ -104,20 +101,15 @@ public final class ScreenPage {
 		browser.resize(window.getWidth(), window.getHeight());
 		browser.update();
 		browser.audio.update(null, volume, 0);
-		//? if >=26.2
 		if (visible) binds.render(browser.handle, window.getWidth(), window.getHeight());
 	}
 
 	void draw(GuiGraphicsExtractor gui) {
 		if (visible && browser != null && browser.hasFrame()) {
-			//? if >=26.2 {
 			float[] blur = Native.blurRects(browser.handle); // backdrop-filter: blur() shows the game, blurred
 			if (blur != null) GameBlur.draw(gui, blur);
-			//?}
 			//? if >=1.21.6 {
 			gui.blit(browser.textureId, 0, 0, gui.guiWidth(), gui.guiHeight(), 0, 1, 0, 1);
-			//? if >=26.2
-			binds.draw(gui); // --vitrine-bind slots, drawn by the game over the page
 			//?} else if >=1.21.2 {
 			/*int w = browser.width, h = browser.height;
 			gui.blit(net.minecraft.client.renderer.RenderType::guiTextured, browser.textureId, 0, 0, 0, 0, gui.guiWidth(), gui.guiHeight(), w, h, w, h);
@@ -128,6 +120,7 @@ public final class ScreenPage {
 			gui.blit(browser.textureId, 0, 0, gui.guiWidth(), gui.guiHeight(), 0, 0, w, h, w, h);
 			com.mojang.blaze3d.systems.RenderSystem.disableBlend();
 			*///?}
+			binds.draw(gui); // --vitrine-bind slots, drawn by the game over the page
 		}
 	}
 }

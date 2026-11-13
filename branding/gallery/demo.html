@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The pages the Modrinth gallery is shot from: ./gradlew :26.3:runClient -Pgallery, then F8 (screen) and F9 (world).
+     scene.json (same folder) picks what shows: {"screen":"menu|shop|character|waypoint","world":"vault|board","hud":true,"v":0}
+     (change "v" to reload the pages). control.txt gives the game orders (see VitrineClient.registerDemo).
+     Needs minecraft-five.otf beside this file (not in git: its licence does not allow redistribution alone). -->
+<style>
+  /* Minecraft Five is drawn on a grid of 0.2em: glyphs are 5 units tall (the lowercase and the digits; capitals are 6),
+     so text is lowercase and sizes are multiples of 5px, or the strokes blur. The overrides centre the glyphs in the line. */
+  @font-face { font-family: Five; src: url(minecraft-five.otf); ascent-override: 120%; descent-override: 20%; line-gap-override: 0%; }
+  :root { --ink: #1e1e1f; --d1: #313233; --d2: #48494a; --d3: #58585a; --l1: #d0d1d4; --l2: #e6e8eb; --mut: #b1b2b5;
+          --g: #3c8527; --gd: #1d4d13; --gl: #6cc349; --r: #c33636; --rd: #7a1c1c;
+          --px: calc(100vh / 1080); --f1: calc(15 * var(--px)); --f2: calc(20 * var(--px)); --f3: calc(30 * var(--px)); --f4: calc(40 * var(--px)); }
+  html { font-size: calc(100vh / 67.5); } /* 16px on a 1080p screen */
+  body { margin: 0; height: 100vh; overflow: hidden; background: transparent; color: #fff;
+         font: var(--f1)/1.4 Five, ui-monospace, monospace; text-transform: lowercase; user-select: none; }
+  * { box-sizing: border-box; }
+  h3, p { margin: 0; }
+  h3 { font-size: var(--f2); font-weight: normal; }
+  .mut { color: var(--mut); }
+  img { image-rendering: pixelated; display: block; flex: none; }
+  .scene { display: none; position: fixed; inset: 0; }
+  .scene.on { display: flex; }
+  .line { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+
+  /* Bedrock-like parts */
+  .bar { flex: none; height: 3.75rem; background: var(--l2); color: var(--ink); border-bottom: .25rem solid var(--mut);
+         display: flex; align-items: center; justify-content: center; position: relative; font-size: var(--f3); }
+  .bar::before { content: ""; position: absolute; left: 1.75rem; width: .75rem; height: .75rem;
+                 border-left: .25rem solid var(--ink); border-bottom: .25rem solid var(--ink); transform: rotate(45deg); }
+  .bar.plain::before { display: none; }
+  .panel { background: var(--d1); border: .125rem solid var(--ink); }
+  .glass { background: rgba(30, 30, 31, .72); backdrop-filter: blur(16px); }
+  .inset { background: #232324; border: .125rem solid var(--ink); box-shadow: inset 0 .25rem 0 #00000055; }
+  .btn { font: inherit; text-transform: inherit; color: var(--ink); background: var(--l1); border: .125rem solid var(--ink); cursor: pointer;
+         padding: .625rem 1rem .875rem; display: flex; align-items: center; justify-content: center;
+         box-shadow: inset 0 -.25rem 0 var(--d3), inset 0 .125rem 0 #fff; }
+  .btn:hover { background: var(--mut); }
+  .btn:active { padding: .75rem 1rem; box-shadow: inset 0 -.125rem 0 var(--d3); }
+  .btn.green { background: var(--g); color: #fff; box-shadow: inset 0 -.25rem 0 var(--gd), inset 0 .125rem 0 var(--gl); }
+  .btn.green:hover { background: #2a641c; }
+  .btn.red { background: var(--r); color: #fff; box-shadow: inset 0 -.25rem 0 var(--rd), inset 0 .125rem 0 #e86a6a; }
+  .btn.big { font-size: var(--f2); padding: .875rem 1rem 1.125rem; }
+  .seg { display: flex; }
+  .seg .btn { flex: 1; margin-left: -.125rem; }
+  .seg .btn:first-child { margin-left: 0; }
+  .seg .btn.sel { background: var(--g) linear-gradient(#fff, #fff) 50% calc(100% - .375rem) / 2.5rem .125rem no-repeat; color: #fff;
+                  box-shadow: inset 0 -.25rem 0 var(--gd), inset 0 .125rem 0 var(--gl); }
+  .side { flex: none; width: 21rem; background: var(--d1); border-right: .25rem solid var(--ink); display: flex; flex-direction: column; }
+  .side a { display: flex; align-items: center; gap: 1rem; padding: .875rem 1.5rem; font-size: var(--f2); }
+  .side a.sel { background: var(--d2); box-shadow: inset 0 -.125rem 0 var(--d3), inset 0 .125rem 0 var(--d3); }
+  .side a img { width: 2.5rem; height: 2.5rem; }
+  .field { font: inherit; text-transform: inherit; color: #fff; width: 100%; padding: .75rem 1rem; outline: 0; }
+  .field:focus { border-color: #fff; }
+  .field::placeholder { color: var(--mut); }
+  .switch { appearance: none; flex: none; width: 3.75rem; height: 1.75rem; margin: 0; background: var(--d3); border: .125rem solid var(--ink); position: relative; cursor: pointer; }
+  .switch::after { content: ""; position: absolute; top: -.25rem; left: -.125rem; width: 1.75rem; height: 2rem; background: var(--l1);
+                   border: .125rem solid var(--ink); box-shadow: inset 0 -.25rem 0 var(--d3), inset 0 .125rem 0 #fff; }
+  .switch:checked { background: var(--g); }
+  .switch:checked::after { left: auto; right: -.125rem; }
+  input[type=range] { appearance: none; display: block; width: 100%; height: .75rem; background: var(--d1); border: .125rem solid var(--ink); margin: .75rem 0; }
+  input[type=range]::-webkit-slider-thumb { appearance: none; width: 1.25rem; height: 2rem; background: var(--l1); border: .125rem solid var(--ink);
+                   box-shadow: inset 0 -.25rem 0 var(--d3), inset 0 .125rem 0 #fff; cursor: pointer; }
+  .prog { height: .625rem; background: #00000080; border: .125rem solid var(--ink); }
+  .prog i { display: block; height: 100%; background: var(--gl); }
+  .slot { --vitrine-bind: vitrine:item; }
+  .page { flex-direction: column; background: rgba(0, 0, 0, .45); backdrop-filter: blur(16px); }
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  /* 1. Menu: glass panels, the game blurred behind them (backdrop-filter) */
+  #menu { align-items: center; justify-content: center; }
+  #menu .pair { display: flex; gap: 2rem; }
+  #menu .main { width: 36rem; }
+  #menu .stack { display: flex; flex-direction: column; gap: .75rem; padding: 1.5rem; }
+  #menu .stack .btn { font-size: var(--f2); padding: .875rem 1rem 1.125rem; }
+  #menu .stack .play { font-size: var(--f3); padding: 1.25rem 1rem 1.5rem; }
+  #menu .stack .mut { text-align: center; margin-bottom: .25rem; }
+  #menu .news { width: 30rem; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between; }
+  #menu .news div { display: flex; gap: 1rem; align-items: center; }
+  #menu .news p { display: flex; flex-direction: column; gap: .375rem; }
+  #menu .news img { width: 4rem; height: 4rem; }
+  #menu .news hr { width: 100%; border: 0; border-top: .125rem solid #ffffff22; margin: 0; }
+
+  /* 2. Shop: item icons from vitrine://item/<id> */
+  #shop .grid { flex: 1; display: grid; grid-template: repeat(3, 1fr) / repeat(4, 1fr); gap: 1.25rem; padding: 1.5rem; }
+  #shop .card { padding: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: space-between; background: var(--d2); }
+  #shop .card > img { width: 7rem; height: 7rem; margin: auto; }
+  #shop .card p { margin: .75rem 0; }
+  #shop .line { width: 100%; }
+  #shop .price { display: flex; align-items: center; gap: .375rem; font-size: var(--f2); min-width: 4.75rem; }
+  #shop .price img { width: 1.5rem; height: 1.5rem; }
+  #shop .card .btn { flex: 1; margin-left: .5rem; }
+  #shop .wallet { margin-top: auto; padding: 1.25rem 1.5rem; border-top: .25rem solid var(--ink); }
+  #shop .wallet .price { font-size: var(--f3); gap: .625rem; margin-top: .5rem; }
+  #shop .wallet img { width: 2.5rem; height: 2.5rem; }
+
+  /* 3. Character: slots the game draws in (--vitrine-bind) */
+  #character .body { padding: 1.5rem; gap: 1.5rem; }
+  #character .me { width: 26rem; display: flex; flex-direction: column; padding: 1.25rem; gap: 1rem; }
+  #player { flex: 1; --vitrine-bind: vitrine:player; cursor: grab; }
+  #character .mut { text-align: center; }
+  #character .right { flex: 1; display: flex; flex-direction: column; gap: 1rem; padding: 1.25rem; }
+  #mobs { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  #mobs .card { background: var(--d2); border: .125rem solid var(--ink); padding: .75rem; display: flex; flex-direction: column; gap: .625rem; }
+  #mobs .card div { flex: 1; --vitrine-bind: vitrine:entity; }
+  #mobs .card p { text-align: center; }
+  #loot { display: flex; gap: .75rem; }
+  #loot div { width: 5.5rem; height: 5.5rem; }
+
+  /* 4. Waypoint: a real form */
+  #waypoint .side { padding: 1.5rem; gap: 1rem; }
+  #waypoint .preview { height: 14rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; font-size: var(--f2); }
+  #waypoint .preview img { width: 6rem; height: 6rem; }
+  #waypoint .saved { margin-top: auto; display: flex; flex-direction: column; gap: .75rem; border-top: .125rem solid var(--d3); padding-top: 1.25rem; }
+  #waypoint .saved img { width: 2rem; height: 2rem; }
+  #waypoint .saved p:nth-child(2) { flex: 1; }
+  #waypoint .form { flex: 1; display: flex; flex-direction: column; }
+  #waypoint .group { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: .625rem; background: var(--d2);
+                     border-bottom: .25rem solid var(--d1); padding: 0 2rem; }
+  #waypoint .xyz { display: flex; gap: 1rem; }
+  #waypoint .xyz label { flex: 1; display: flex; align-items: center; gap: .75rem; }
+  #waypoint .icons .btn { padding: .375rem .5rem .625rem; }
+  #waypoint .icons img { width: 2.5rem; height: 2.5rem; }
+  #waypoint .colors i { width: 1.75rem; height: 1.75rem; border: .125rem solid var(--ink); }
+
+  /* HUD: what the screen page shows while it does not have the focus */
+  #hud { pointer-events: none; padding: 1.5rem; justify-content: space-between; align-items: flex-start; }
+  #hud .panel { padding: 1rem 1.25rem; }
+  #pos { font-size: var(--f3); margin-top: .25rem; }
+  #hud .toast { display: flex; gap: 1rem; align-items: center; }
+  #hud .toast p + p { font-size: var(--f2); }
+  #hud .quests { width: 31rem; display: flex; flex-direction: column; gap: 1rem; }
+  #hud .q { display: flex; gap: 1rem; align-items: center; }
+  #hud img { width: 3rem; height: 3rem; }
+  #hud .q > div { flex: 1; display: flex; flex-direction: column; gap: .375rem; }
+
+  /* World panels: opaque, larger type, and buttons stand out of the panel (--vitrine-depth) */
+  html.world { --px: calc(100vh / 720); }
+  body.world { background: var(--d1); font-size: var(--f2); }
+  body.world .scene { flex-direction: column; }
+  .raise { --vitrine-depth: 16px; transition: --vitrine-depth .08s; }
+  .raise:active { --vitrine-depth: 4px; }
+  #vault .body, #board .body { padding: 1.5rem; gap: 1.5rem; }
+  #vault .pad { --vitrine-depth: 8px; background: var(--d2); border: .125rem solid var(--ink); padding: 1.25rem;
+                display: grid; grid-template-columns: repeat(3, 5.5rem); grid-auto-rows: 1fr; gap: 1rem; }
+  #vault .pad .btn { font-size: var(--f4); padding: 0 0 .25rem; }
+  #vault .right { flex: 1; display: flex; flex-direction: column; gap: 1.5rem; }
+  #code { font-size: var(--f4); letter-spacing: 1rem; height: 6rem; display: flex; align-items: center; justify-content: center; color: var(--gl); }
+  #vault .lamps { display: flex; gap: 1.25rem; align-items: center; }
+  #vault .lamp { --vitrine-depth: 10px; width: 3rem; height: 3rem; border-radius: 50%; background: var(--d3); border: .125rem solid var(--ink); }
+  #vault .lamp.on { background: var(--gl); }
+  #vault .lamp.err { background: var(--r); }
+  #vault .lamps p { margin-left: auto; }
+  #vault .go { flex: 1; display: flex; gap: 1.5rem; }
+  #vault .go .btn { flex: 1; font-size: var(--f4); }
+  #board .star { width: 20rem; display: flex; flex-direction: column; padding: 1rem; gap: 1rem; background: var(--d2); }
+  #board .star h3 { text-align: center; }
+  #board .star div { flex: 1; --vitrine-bind: vitrine:player; }
+  #board .right { flex: 1; display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+  #board .prizes { display: flex; gap: 1rem; align-items: center; }
+  #board .prizes div { width: 5rem; height: 5rem; }
+  #notes { flex: 1; padding: 1rem 1.25rem; overflow: hidden; display: flex; flex-direction: column; gap: .75rem; }
+  #board .write { display: flex; gap: 1rem; }
+  #board .write .btn { flex: none; width: 10rem; }
+</style>
+</head>
+<body>
+
+<section id="hud" class="scene">
+  <div class="panel glass">
+    <p class="mut">position</p>
+    <p id="pos">0 64 0</p>
+  </div>
+  <div class="panel glass toast">
+    <img src="vitrine://item/minecraft:writable_book/64">
+    <div><p class="mut">new quest</p><p>find a stronghold</p></div>
+  </div>
+  <div class="panel glass quests">
+    <h3>quests</h3>
+    <div class="q"><img src="vitrine://item/minecraft:diamond/64"><div><div class="line"><p>mine diamonds</p><p>3/5</p></div><div class="prog"><i style="width:60%"></i></div></div></div>
+    <div class="q"><img src="vitrine://item/minecraft:bread/64"><div><div class="line"><p>bake bread</p><p>4/16</p></div><div class="prog"><i style="width:25%"></i></div></div></div>
+    <div class="q"><img src="vitrine://item/minecraft:ender_eye/64"><div><div class="line"><p>find a stronghold</p><p>0/1</p></div><div class="prog"><i style="width:0"></i></div></div></div>
+  </div>
+</section>
+
+<section id="menu" class="scene">
+  <div class="pair">
+    <div class="panel glass main">
+      <div class="bar plain">skyhaven</div>
+      <div class="stack">
+        <p class="mut">12 players online</p>
+        <button class="btn green play">play</button>
+        <button class="btn">quests</button>
+        <button class="btn">marketplace</button>
+        <button class="btn">settings</button>
+        <button class="btn red">disconnect</button>
+      </div>
+    </div>
+    <div class="panel glass news">
+      <h3>news</h3>
+      <div><img src="vitrine://item/minecraft:elytra/64"><p>sky race saturday<span class="mut">bring your rockets</span></p></div>
+      <hr>
+      <div><img src="vitrine://item/minecraft:emerald/64"><p>new market prices<span class="mut">diamonds up 12%</span></p></div>
+      <hr>
+      <div><img src="vitrine://item/minecraft:cake/64"><p>skyhaven turns two<span class="mut">free cake at spawn</span></p></div>
+      <hr>
+      <div><img src="vitrine://item/minecraft:filled_map/64"><p>new lands opened<span class="mut">border moved east</span></p></div>
+    </div>
+  </div>
+</section>
+
+<section id="shop" class="scene page">
+  <div class="bar">marketplace</div>
+  <div class="body">
+    <div class="side" id="cats"></div>
+    <div class="grid" id="goods"></div>
+  </div>
+</section>
+
+<section id="character" class="scene page">
+  <div class="bar">character</div>
+  <div class="body">
+    <div class="panel me">
+      <h3>you</h3>
+      <div id="player" class="inset" data-vitrine="20 5"></div>
+      <p class="mut">drag to turn</p>
+    </div>
+    <div class="panel right">
+      <h3>bestiary</h3>
+      <div id="mobs"></div>
+      <h3>loot</h3>
+      <div id="loot"></div>
+    </div>
+  </div>
+</section>
+
+<section id="waypoint" class="scene page">
+  <div class="bar">new waypoint</div>
+  <div class="body">
+    <div class="side">
+      <div class="inset preview"><img id="wpIcon" src="vitrine://item/minecraft:red_bed/128"><p id="wpName">home</p></div>
+      <button class="btn green big">create</button>
+      <button class="btn">use my position</button>
+      <div class="saved">
+        <p class="mut">saved</p>
+        <div class="line"><img src="vitrine://item/minecraft:iron_pickaxe/64"><p>mine</p><p class="mut">412 m</p></div>
+        <div class="line"><img src="vitrine://item/minecraft:emerald/64"><p>village</p><p class="mut">96 m</p></div>
+        <div class="line"><img src="vitrine://item/minecraft:obsidian/64"><p>portal</p><p class="mut">1203 m</p></div>
+        <div class="line"><img src="vitrine://item/minecraft:oak_boat/64"><p>dock</p><p class="mut">58 m</p></div>
+      </div>
+    </div>
+    <div class="form">
+      <div class="group"><p>name</p><input id="wpField" class="field inset" value="home" maxlength="24" spellcheck="false"></div>
+      <div class="group"><p>position</p><div class="xyz">
+        <label>x<input class="field inset" value="200"></label><label>y<input class="field inset" value="74"></label><label>z<input class="field inset" value="-750"></label></div></div>
+      <div class="group"><p>icon</p><div class="seg icons" id="wpIcons"></div></div>
+      <div class="group"><p>colour</p><div class="seg colors" id="wpColors"></div></div>
+      <div class="group"><p>dimension</p>
+        <div class="seg"><button class="btn sel">overworld</button><button class="btn">nether</button><button class="btn">the end</button></div></div>
+      <div class="group">
+        <div class="line"><p>show beam</p><input type="checkbox" class="switch" checked></div>
+        <div class="line" style="margin-top:.5rem"><p>share with party</p><input type="checkbox" class="switch"></div>
+      </div>
+      <div class="group"><p>visible up to <span id="wpDist">512</span> blocks</p><input id="wpRange" type="range" min="64" max="1024" step="64" value="512"></div>
+    </div>
+  </div>
+</section>
+
+<section id="vault" class="scene">
+  <div class="bar plain">vault door</div>
+  <div class="body">
+    <div class="pad" id="keys"></div>
+    <div class="right">
+      <div id="code" class="inset"></div>
+      <div class="lamps"><div class="lamp" id="lamp1"></div><div class="lamp" id="lamp2"></div><div class="lamp" id="lamp3"></div><p class="mut">aim and click</p></div>
+      <div class="go"><button class="btn green raise" id="open">open</button><button class="btn red raise" id="lock">lock</button></div>
+    </div>
+  </div>
+</section>
+
+<section id="board" class="scene">
+  <div class="bar plain">spawn board</div>
+  <div class="body">
+    <div class="panel star"><h3>top builder</h3><div class="inset" data-vitrine="-25 5"></div></div>
+    <div class="right">
+      <div class="prizes"><h3>prizes</h3><div class="slot inset" data-vitrine="minecraft:netherite_ingot"></div><div class="slot inset" data-vitrine="minecraft:elytra"></div><div class="slot inset" data-vitrine="minecraft:clock"></div></div>
+      <div id="notes" class="inset"><p>alex: the nether hub is open!</p><p>kai: selling mending books</p><p>noor: who took my llama?</p><p>sam: sky race starts at noon</p><p>juno: free cake at spawn</p><p>rui: need 12 oak logs, paying</p><p>mika: found a stronghold!</p></div>
+      <div class="write"><input id="note" class="field inset" placeholder="leave a note" maxlength="30" spellcheck="false"><button class="btn green raise" id="post">post</button></div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const icon = (id, px = 128) => `<img src="vitrine://item/minecraft:${id}/${px}">`;
+  const world = location.search.includes('world');
+  const inGame = location.protocol === 'vitrine:';
+  document.body.classList.toggle('world', world);
+  document.documentElement.classList.toggle('world', world);
+  if (world) document.documentElement.style.fontSize = '16px'; // the panel is 1280x720
+
+  // Which scene shows: scene.json in the game (edited while it runs), #name in a browser.
+  let state = { screen: 'menu', world: 'vault', hud: true }, version = null, focused = !inGame && location.hash !== '#hud';
+  if (location.hash.length > 1) state.screen = state.world = location.hash.slice(1);
+  const apply = () => {
+    const on = world ? state.world : focused ? state.screen : state.hud ? 'hud' : '';
+    for (const s of document.querySelectorAll('.scene')) s.classList.toggle('on', s.id === on);
+  };
+  if (inGame) {
+    setInterval(async () => {
+      try { state = { ...state, ...await (await fetch('scene.json', { cache: 'no-store' })).json() }; } catch {}
+      if (version === null) version = state.v;
+      else if (state.v !== version) location.reload();
+      apply();
+    }, 300);
+    addEventListener('focus', () => { focused = true; apply(); });
+    addEventListener('blur', () => { focused = false; apply(); });
+    focused = document.hasFocus();
+  }
+  apply();
+
+  // HUD: Java sends the player's position (ScreenView.send).
+  addEventListener('message', e => {
+    if (e.data?.type === 'pos') $('pos').textContent = `${Math.round(e.data.x)} ${Math.round(e.data.y)} ${Math.round(e.data.z)}`;
+  });
+
+  // Shop
+  $('cats').innerHTML = [['nether_star', 'featured'], ['iron_pickaxe', 'tools'], ['diamond_sword', 'combat'], ['grass_block', 'blocks'], ['bread', 'food'], ['redstone', 'redstone']]
+    .map(([id, name], i) => `<a class="${i ? '' : 'sel'}">${icon(id, 64)}${name}</a>`).join('')
+    + `<div class="wallet"><p class="mut">your balance</p><div class="price">${icon('emerald', 64)}1284</div></div>`;
+  $('goods').innerHTML = [['diamond_pickaxe', 'diamond pickaxe', 24], ['elytra', 'elytra', 64], ['golden_apple', 'golden apple', 8], ['ender_pearl', 'ender pearl', 4],
+    ['totem_of_undying', 'totem of undying', 48], ['spyglass', 'spyglass', 6], ['saddle', 'saddle', 12], ['trident', 'trident', 40],
+    ['netherite_ingot', 'netherite ingot', 56], ['name_tag', 'name tag', 20], ['shulker_box', 'shulker box', 32], ['experience_bottle', 'bottle of xp', 10]]
+    .map(([id, name, price]) => `<div class="panel card">${icon(id)}<p>${name}</p><div class="line"><div class="price">${icon('emerald', 64)}${price}</div><button class="btn green">buy</button></div></div>`).join('');
+
+  // Character: the page says what each slot shows (data-vitrine) and can change it, here by dragging.
+  $('mobs').innerHTML = (new URLSearchParams(location.search).get('mobs') || 'creeper,allay,villager,enderman,snow_golem,iron_golem').split(',')
+    .map((id, i) => `<div class="card"><div class="inset" data-vitrine="minecraft:${id} ${i % 2 ? -30 : 30} 10"></div><p>${id.replace('_', ' ')}</p></div>`).join('');
+  $('loot').innerHTML = ['compass', 'clock', 'netherite_sword', 'enchanted_golden_apple', 'trident', 'shield', 'diamond_chestplate', 'bow', 'ender_chest']
+    .map(id => `<div class="slot inset" data-vitrine="minecraft:${id}"></div>`).join('');
+  let yaw = 20, drag = null;
+  $('player').onpointerdown = e => { drag = e.clientX - yaw; $('player').setPointerCapture(e.pointerId); };
+  $('player').onpointermove = e => { if (drag !== null) $('player').dataset.vitrine = `${yaw = e.clientX - drag} 5`; };
+  $('player').onpointerup = () => drag = null;
+
+  // Waypoint
+  $('wpIcons').innerHTML = ['red_bed', 'chest', 'diamond_pickaxe', 'campfire', 'oak_boat', 'ender_eye']
+    .map((id, i) => `<button class="btn ${i ? '' : 'sel'}" data-id="${id}">${icon(id, 64)}</button>`).join('');
+  $('wpColors').innerHTML = ['#e04b4b', '#f0a13a', '#f2d64b', '#6cc349', '#4bb8e0', '#a66be0']
+    .map((c, i) => `<button class="btn ${i ? '' : 'sel'}"><i style="background:${c}"></i></button>`).join('');
+  for (const seg of document.querySelectorAll('.seg')) seg.onclick = e => {
+    const b = e.target.closest('.btn');
+    if (!b) return;
+    for (const o of seg.children) o.classList.toggle('sel', o === b);
+    if (b.dataset.id) $('wpIcon').src = `vitrine://item/minecraft:${b.dataset.id}/128`;
+  };
+  $('wpField').oninput = () => $('wpName').textContent = $('wpField').value || '-';
+  $('wpRange').oninput = () => $('wpDist').textContent = $('wpRange').value;
+
+  // Vault: a keypad whose keys stand out of the panel.
+  let code = '258';
+  const lamps = cls => ['lamp1', 'lamp2', 'lamp3'].forEach(id => $(id).className = 'lamp ' + cls);
+  const show = () => $('code').textContent = code.padEnd(4, '-');
+  $('keys').innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'c', 0, '<'].map(k => `<button class="btn raise">${k}</button>`).join('');
+  $('keys').onclick = e => {
+    const k = e.target.closest('.btn')?.textContent;
+    if (k == null) return;
+    code = k === 'c' ? '' : k === '<' ? code.slice(0, -1) : (code + k).slice(0, 4);
+    show();
+    lamps('');
+  };
+  $('open').onclick = () => lamps(code === '2580' ? 'on' : 'err');
+  $('lock').onclick = () => lamps('');
+  show();
+
+  // Board: typing into a panel in the world.
+  const post = () => {
+    if (!$('note').value.trim()) return;
+    const p = document.createElement('p');
+    p.textContent = 'you: ' + $('note').value;
+    $('notes').append(p);
+    $('note').value = '';
+  };
+  $('post').onclick = post;
+  $('note').onkeydown = e => { if (e.key === 'Enter') post(); };
+</script>
+</body>
+</html>
