@@ -19,7 +19,7 @@ On its own, Vitrine adds nothing to the game. Install it when another mod depend
 
 ```kotlin
 repositories { maven("https://api.modrinth.com/maven") }
-dependencies { implementation("maven.modrinth:holoweb-vitrine:0.2.0+26.3") } // modImplementation up to 1.21.11
+dependencies { implementation("maven.modrinth:holoweb-vitrine:0.2.1+26.3") } // modImplementation up to 1.21.11
 ```
 
 ```java

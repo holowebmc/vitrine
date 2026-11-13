@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- `backdrop-filter: blur()`, item icons (`vitrine://item/...`) and game-drawn slots (`--vitrine-bind`, `Vitrine.bind`) now work on every supported Minecraft version, 1.20.1 to 26.3, not only 26.2+.
+- Before Minecraft 1.21.9 a `Vitrine.Bind` draws into a `MultiBufferSource` (the game has no `SubmitNodeCollector` there).
+
 ## 0.2.0
 
 - Screen pages blur the game behind them with `backdrop-filter: blur()` (Minecraft 26.2+).

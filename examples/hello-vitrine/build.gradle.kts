@@ -12,7 +12,7 @@ dependencies {
     minecraft("com.mojang:minecraft:26.3")
     implementation("net.fabricmc:fabric-loader:0.20.1")
     implementation("net.fabricmc.fabric-api:fabric-api:0.165.2+26.3")
-    implementation("dev.holoweb:vitrine:0.2.0+26.3")
+    implementation("dev.holoweb:vitrine:0.2.1+26.3")
 }
 
 java {
