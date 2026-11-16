@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- NeoForge 1.21.1 (alpha): a separate jar, `vitrine-0.3.0+1.21.1-neoforge.jar`, for NeoForge 21.1 (any build). Same API and features as the Fabric 1.21.1 jar. Tested with Sodium and Distant Horizons installed; Iris not yet.
+- Mods on NeoForge depend on `maven.modrinth:holoweb-vitrine:0.3.0+1.21.1-neoforge`.
+
 ## 0.2.1
 
 - `backdrop-filter: blur()`, item icons (`vitrine://item/...`) and game-drawn slots (`--vitrine-bind`, `Vitrine.bind`) now work on every supported Minecraft version, 1.20.1 to 26.3, not only 26.2+.

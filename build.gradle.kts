@@ -115,7 +115,7 @@ extensions.configure<ModrinthExtension> {
     token = providers.environmentVariable("MODRINTH_TOKEN")
     projectId = "holoweb-vitrine"
     versionNumber = project.version.toString()
-    versionName = "Vitrine ${property("mod.version")} for Minecraft ${property("mod.mc_versions").toString().replace(",", ", ")}"
+    versionName = "Vitrine ${property("mod.version")} for ${if (neoforge) "NeoForge" else "Minecraft"} ${property("mod.mc_versions").toString().replace(",", ", ")}"
     versionType = "alpha"
     System.getenv("MODRINTH_CHANGELOG")?.let { changelog = it } // CHANGELOG.md's section + the CI run, from the workflow
     uploadFile.set(tasks.named(if (obfuscated) "remapJar" else "jar"))

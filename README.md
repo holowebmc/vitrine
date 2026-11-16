@@ -1,6 +1,6 @@
 # Vitrine
 
-Vitrine is a client-side Fabric library that embeds Chromium in Minecraft so other mods can build their UI with HTML, CSS and JavaScript.
+Vitrine is a client-side library for Fabric and NeoForge that embeds Chromium in Minecraft so other mods can build their UI with HTML, CSS and JavaScript.
 
 - **On screen:** a page drawn over the game, either as a HUD with no focus or as a focused screen that takes the mouse and keyboard.
 - **In the world:** a page on a panel placed anywhere. Players aim at it and click, text fields take the keyboard, and the page's audio is positional.
@@ -13,13 +13,13 @@ On its own, Vitrine adds nothing to the game. Install it when another mod depend
 - **Windows x64 only for now.** On other systems the mod loads, but pages stay empty.
 - **First launch:** the mod downloads the Chromium Embedded Framework (CEF) from its official CDN, about 170 MB, and checks it against a SHA-256 hash. It is installed once per game folder (about 350 MB).
 - **Rendering:** frames go from Chromium to the game without leaving the GPU, on both OpenGL and Vulkan.
-- **Requirements:** Fabric Loader and Fabric API. Minecraft versions 1.20.1 through 26.3 are supported.
+- **Requirements:** Fabric Loader and Fabric API, Minecraft 1.20.1 through 26.3. NeoForge 21.1 on Minecraft 1.21.1 (alpha).
 
 ## For mod developers
 
 ```kotlin
 repositories { maven("https://api.modrinth.com/maven") }
-dependencies { implementation("maven.modrinth:holoweb-vitrine:0.2.1+26.3") } // modImplementation up to 1.21.11
+dependencies { implementation("maven.modrinth:holoweb-vitrine:0.3.0+26.3") } // modImplementation up to 1.21.11; NeoForge: 0.3.0+1.21.1-neoforge
 ```
 
 ```java
