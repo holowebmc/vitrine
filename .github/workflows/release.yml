@@ -27,7 +27,10 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: 25
+          # 25 runs Gradle; 21 is the toolchain ModDevGradle compiles the NeoForge 1.21.1 node with.
+          java-version: |
+            21
+            25
           cache: gradle
 
       # The archive the mod itself downloads on first launch, with the SHA-256 it checks (impl/CefRuntime.java).
@@ -48,7 +51,7 @@ jobs:
           ctest --test-dir native/build -C Release --output-on-failure
 
       - name: Jars
-        run: ./gradlew build
+        run: ./gradlew build -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
 
       - name: Hashes
         run: |
@@ -81,5 +84,5 @@ jobs:
           export MODRINTH_CHANGELOG="$(awk -v h="## $version" '$0 == h { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md)
 
           Built by GitHub Actions from commit [${GITHUB_SHA::7}]($repo/tree/$GITHUB_SHA) ([run]($repo/actions/runs/$GITHUB_RUN_ID)); SHA-512 sums in the [release]($repo/releases/tag/$GITHUB_REF_NAME)."
-          ./gradlew modrinth
+          ./gradlew modrinth -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
           gh release create "$GITHUB_REF_NAME" dist/* --title "Vitrine $version" --notes "$MODRINTH_CHANGELOG"
