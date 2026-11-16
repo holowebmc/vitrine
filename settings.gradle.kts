@@ -15,6 +15,7 @@ plugins {
 stonecutter {
     create(rootProject) {
         versions("1.20.1", "1.21.1", "1.21.4", "1.21.5", "1.21.8", "1.21.11", "26.1.2", "26.3")
+        version("1.21.1-neoforge", "1.21.1") // same sources on NeoForge: //? if neoforge
         vcsVersion = "26.3"
     }
 }

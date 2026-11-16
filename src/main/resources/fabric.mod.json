@@ -8,7 +8,7 @@
 	"icon": "assets/vitrine/icon.png",
 	"environment": "client",
 	"entrypoints": {
-		"client": ["dev.holoweb.vitrine.impl.VitrineClient"]
+		"client": ["dev.holoweb.vitrine.impl.FabricEntry"]
 	},
 	"mixins": ["vitrine.mixins.json"],
 	"depends": {

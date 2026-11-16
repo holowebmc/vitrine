@@ -1,13 +1,20 @@
 import com.modrinth.minotaur.ModrinthExtension
 import net.fabricmc.loom.api.LoomGradleExtensionAPI
+import net.neoforged.moddevgradle.dsl.NeoForgeExtension
 
+// Nodes named <mc>-neoforge build for NeoForge (ModDevGradle); the others for Fabric (Loom).
+// Sources tell them apart with //? if fabric / //? if neoforge.
+val neoforge = stonecutter.current.project.endsWith("-neoforge")
+val loader = if (neoforge) "neoforge" else "fabric"
+stonecutter.constants.match(loader, "fabric", "neoforge")
 // Up to 1.21.11 Minecraft ships obfuscated: Loom remaps with Mojang's mappings. 26.x is plain.
-val obfuscated = stonecutter.eval(stonecutter.current.version, "<=1.21.11")
-apply(plugin = if (obfuscated) "net.fabricmc.fabric-loom-remap" else "net.fabricmc.fabric-loom")
+// NeoForge runs on Mojang's names, so its jar needs no remapping.
+val obfuscated = !neoforge && stonecutter.eval(stonecutter.current.version, "<=1.21.11")
+apply(plugin = if (neoforge) "net.neoforged.moddev" else if (obfuscated) "net.fabricmc.fabric-loom-remap" else "net.fabricmc.fabric-loom")
 apply(plugin = "maven-publish")
 apply(plugin = "com.modrinth.minotaur")
 
-version = "${property("mod.version")}+${stonecutter.current.version}"
+version = "${property("mod.version")}+${stonecutter.current.project}"
 group = property("mod.group") as String
 base.archivesName = "vitrine"
 
@@ -43,35 +50,53 @@ stonecutter.replacements {
 }
 
 val java = JavaVersion.toVersion(property("java").toString())
-val loom = extensions.getByType<LoomGradleExtensionAPI>()
 
-fun mod(configuration: String) = if (obfuscated) "mod" + configuration.replaceFirstChar(Char::uppercase) else configuration
+// runClient: run/<node>/, with these system properties.
+val devRunDir = rootProject.layout.projectDirectory.dir("run/${stonecutter.current.project}")
+val runProperties = buildMap {
+    // Dev: use the runtime that CMake assembles (native/build/out). -PcefDownload tests the player path
+    // instead: download CEF into run/<mc>/vitrine/cef and copy the natives from the jar.
+    if (!project.hasProperty("cefDownload")) put("vitrine.cefDir", rootProject.file("native/build/out").absolutePath)
+    // -PcpuFrames tests the CPU fallback (frames copied and uploaded) instead of zero-copy GPU frames.
+    if (project.hasProperty("cpuFrames")) put("vitrine.gpu", "false")
+    put("vitrine.demo", "true") // F8/F9 demo pages; off for mods that depend on Vitrine
+    // -Pgallery: the demo keys show the pages the Modrinth gallery is shot from (branding/gallery).
+    if (project.hasProperty("gallery")) put("vitrine.demoDir", rootProject.file("branding/gallery").absolutePath)
+}
 
-dependencies {
-    "minecraft"("com.mojang:minecraft:${property("minecraft")}")
-    if (obfuscated) "mappings"(loom.officialMojangMappings())
-    mod("implementation")("net.fabricmc:fabric-loader:${property("deps.fabric_loader")}")
-    mod("implementation")("net.fabricmc.fabric-api:fabric-api:${property("deps.fabric_api")}")
-    // Dev only: -Psodium / -Piris add them to runClient to test compatibility (versions per node).
-    // -Piris brings Sodium too (Iris needs it). Nodes without deps.<name> are skipped.
-    val extras = if (project.hasProperty("iris")) listOf("sodium", "iris") else if (project.hasProperty("sodium")) listOf("sodium") else listOf()
-    for (name in extras) findProperty("deps.$name")?.let { mod("localRuntime")("maven.modrinth:$name:$it") }
+if (neoforge) {
+    extensions.configure<NeoForgeExtension> {
+        version = property("deps.neoforge") as String
+        runs.register("client") {
+            client()
+            gameDirectory = devRunDir
+            runProperties.forEach(::systemProperty)
+        }
+        mods.register("vitrine") { sourceSet(the<SourceSetContainer>()["main"]) }
+    }
+} else {
+    val loom = extensions.getByType<LoomGradleExtensionAPI>()
+    fun mod(configuration: String) = if (obfuscated) "mod" + configuration.replaceFirstChar(Char::uppercase) else configuration
+
+    dependencies {
+        "minecraft"("com.mojang:minecraft:${property("minecraft")}")
+        if (obfuscated) "mappings"(loom.officialMojangMappings())
+        mod("implementation")("net.fabricmc:fabric-loader:${property("deps.fabric_loader")}")
+        mod("implementation")("net.fabricmc.fabric-api:fabric-api:${property("deps.fabric_api")}")
+        // Dev only: -Psodium / -Piris add them to runClient to test compatibility (versions per node).
+        // -Piris brings Sodium too (Iris needs it). Nodes without deps.<name> are skipped.
+        val extras = if (project.hasProperty("iris")) listOf("sodium", "iris") else if (project.hasProperty("sodium")) listOf("sodium") else listOf()
+        for (name in extras) findProperty("deps.$name")?.let { mod("localRuntime")("maven.modrinth:$name:$it") }
+    }
+
+    loom.runConfigs.configureEach {
+        runDirectory = devRunDir
+        runProperties.forEach(::property)
+    }
 }
 
 repositories {
     maven("https://api.modrinth.com/maven") { content { includeGroup("maven.modrinth") } }
-}
-
-loom.runConfigs.configureEach {
-    runDirectory = rootProject.layout.projectDirectory.dir("run/${stonecutter.current.version}")
-    // Dev: use the runtime that CMake assembles (native/build/out). -PcefDownload tests the player path
-    // instead: download CEF into run/<mc>/vitrine/cef and copy the natives from the jar.
-    if (!project.hasProperty("cefDownload")) property("vitrine.cefDir", rootProject.file("native/build/out").absolutePath)
-    // -PcpuFrames tests the CPU fallback (frames copied and uploaded) instead of zero-copy GPU frames.
-    if (project.hasProperty("cpuFrames")) property("vitrine.gpu", "false")
-    property("vitrine.demo", "true") // F8/F9 demo pages; off for mods that depend on Vitrine
-    // -Pgallery: the demo keys show the pages the Modrinth gallery is shot from (branding/gallery).
-    if (project.hasProperty("gallery")) property("vitrine.demoDir", rootProject.file("branding/gallery").absolutePath)
 }
 
 extensions.configure<JavaPluginExtension> {
@@ -80,7 +105,7 @@ extensions.configure<JavaPluginExtension> {
     withSourcesJar() // the API's javadoc reaches IDEs through the sources
 }
 
-// Other mods depend on dev.holoweb:vitrine:<mod.version>+<mc> (one artifact per Minecraft build).
+// Other mods depend on dev.holoweb:vitrine:<mod.version>+<node> (<mc>, or <mc>-neoforge: one artifact per build).
 // Only dev.holoweb.vitrine is API; dev.holoweb.vitrine.impl can change in any release.
 // Modrinth: .github/workflows/release.yml runs ./gradlew modrinth on a v<mod.version> tag, so the files
 // there are always built by CI (players download them, and mods depend on
@@ -95,8 +120,8 @@ extensions.configure<ModrinthExtension> {
     System.getenv("MODRINTH_CHANGELOG")?.let { changelog = it } // CHANGELOG.md's section + the CI run, from the workflow
     uploadFile.set(tasks.named(if (obfuscated) "remapJar" else "jar"))
     gameVersions.addAll(property("mod.mc_versions").toString().split(","))
-    loaders.add("fabric")
-    dependencies { required.project("fabric-api") }
+    loaders.add(loader)
+    if (!neoforge) dependencies { required.project("fabric-api") }
     debugMode = project.hasProperty("modrinthDry") // -PmodrinthDry: print the upload, send nothing
 }
 tasks.named("modrinth") { notCompatibleWithConfigurationCache("Minotaur reads the project at execution time") }
@@ -119,7 +144,7 @@ tasks {
             "version" to project.version,
             "minecraft" to project.property("mod.mc_dep"),
             "java" to java.majorVersion,
-            "loader" to project.property("deps.fabric_loader"),
+            "loader" to project.property(if (neoforge) "deps.neoforge" else "deps.fabric_loader"),
             // Version-specific mixins: Vulkan zero-copy only on renderpearl; backdrop blur in the GUI renderer (1.21.6+) or our offscreen target as the main one (before); NativeImage pointer before 1.21.5.
             "extra_mixins" to buildList {
                 if (!preRenderpearl) addAll(listOf("VulkanFeatureSetsMixin", "VulkanCommandEncoderAccessor"))
@@ -128,7 +153,8 @@ tasks {
             }.joinToString("") { ", \"$it\"" },
         )
         inputs.properties(props)
-        filesMatching(listOf("fabric.mod.json", "*.mixins.json")) { expand(props) }
+        filesMatching(listOf("fabric.mod.json", "META-INF/neoforge.mods.toml", "*.mixins.json")) { expand(props) }
+        exclude(if (neoforge) "fabric.mod.json" else "META-INF/neoforge.mods.toml")
 
         // Our natives ride in the jar (CefRuntime copies them next to the downloaded CEF), so they always
         // match this build. Build them first: cmake --build native/build --config Release.

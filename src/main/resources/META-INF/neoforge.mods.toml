@@ -1,0 +1,25 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "vitrine"
+version = "${version}"
+displayName = "Vitrine"
+description = "Chromium (CEF) UIs on screen and in the world."
+logoFile = "assets/vitrine/icon.png"
+
+[[mixins]]
+config = "vitrine.mixins.json"
+
+[[dependencies.vitrine]]
+modId = "neoforge"
+type = "required"
+versionRange = "[${loader},)"
+side = "CLIENT"
+
+[[dependencies.vitrine]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraft}"
+side = "CLIENT"

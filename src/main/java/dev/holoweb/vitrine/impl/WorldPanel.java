@@ -17,8 +17,9 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 /*import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldExtractionContext;
 *///?} else {
-/*import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
+/*import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.MultiBufferSource;
+import org.joml.Matrix4f;
 *///?}
 import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundSource;
@@ -146,14 +147,14 @@ public final class WorldPanel {
 		frustum = ctx.frustum();
 	}
 	*///?} else {
-	/*static void captureCamera(WorldRenderContext ctx) {
-		camPos = ctx.camera().getPosition();
-		camRot.set(ctx.camera().rotation());
+	/*static void captureCamera(Camera camera, Matrix4f projection, Frustum cull) {
+		camPos = camera.getPosition();
+		camRot.set(camera.rotation());
 		//? if <1.20.5
 		camRot.rotateY((float) Math.PI); // the old camera looks along +Z with +X to its left; ray() wants -Z / +X right
-		tanX = 1 / ctx.projectionMatrix().m00();
-		tanY = 1 / ctx.projectionMatrix().m11();
-		frustum = ctx.frustum();
+		tanX = 1 / projection.m00();
+		tanY = 1 / projection.m11();
+		frustum = cull;
 	}
 	*///?}
 

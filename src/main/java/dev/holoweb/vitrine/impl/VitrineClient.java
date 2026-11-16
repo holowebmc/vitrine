@@ -7,32 +7,21 @@ import dev.holoweb.vitrine.WorldView;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
-//? if >=1.21.6 {
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-//?} else
-/*import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;*/
-//? if >=26.1 {
-import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
-//?} else if >=1.21.9 {
-/*import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-*///?} else {
-/*import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
-*///?}
-import net.fabricmc.loader.api.FabricLoader;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
-import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public final class VitrineClient implements ClientModInitializer {
+/** Client start, shared by the loader entries ({@link FabricEntry}, {@link NeoForgeEntry}), which hook the events. */
+public final class VitrineClient {
 	public static final Logger LOG = LoggerFactory.getLogger("vitrine");
+	static final boolean DEMO = Boolean.getBoolean("vitrine.demo"); // set by this project's runClient only
+
+	private static Path gameDir;
 
 	/** Set by the setup thread once the runtime is on disk and its DLLs are loaded; consumed on the render thread. */
 	private static volatile Path loaded;
@@ -40,40 +29,23 @@ public final class VitrineClient implements ClientModInitializer {
 	/** Shown only when there's something to install (or it failed); render thread. */
 	private static SetupToast setupToast;
 
-	@Override
-	public void onInitializeClient() {
+	/** Starts the CEF setup; false (and nothing to hook) where pages can't run. */
+	static boolean start(Path gameDir) {
 		String os = System.getProperty("os.name", ""), arch = System.getProperty("os.arch", "");
 		if (!os.startsWith("Windows") || !arch.equals("amd64")) {
 			LOG.warn("Vitrine: only Windows x64 is supported for now ({} {}); pages are disabled", os, arch);
-			return;
+			return false;
 		}
+		VitrineClient.gameDir = gameDir;
 		// First run downloads CEF (~170 MB): keep it off the game's startup. Pages work once it's done.
 		Thread setup = new Thread(VitrineClient::setUp, "Vitrine CEF setup");
 		setup.setDaemon(true);
 		setup.start();
-
-		//? if >=1.21.6 {
-		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("vitrine", "screens"),
-				(gui, delta) -> Pages.drawHud(gui, VitrineScreen.current()));
-		//?} else
-		/*HudRenderCallback.EVENT.register((gui, delta) -> Pages.drawHud(gui, VitrineScreen.current()));*/
-		//? if >=26.1 {
-		LevelRenderEvents.COLLECT_SUBMITS.register(Pages::renderWorld);
-		//?} else if >=1.21.9 {
-		/*WorldRenderEvents.END_EXTRACTION.register(WorldPanel::captureCamera);
-		WorldRenderEvents.BEFORE_ENTITIES.register(Pages::renderWorld);
-		*///?} else {
-		/*WorldRenderEvents.AFTER_ENTITIES.register(Pages::renderWorld);
-		*///?}
-		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> Pages.shutdown());
-
 		BuiltinBinds.register();
-
-		if (Boolean.getBoolean("vitrine.demo")) registerDemo(); // set by this project's runClient only
+		return true;
 	}
 
 	private static void setUp() {
-		Path gameDir = FabricLoader.getInstance().getGameDir();
 		String devDir = System.getProperty("vitrine.cefDir"); // dev: the CMake output, used as is
 		try {
 			Path dir = devDir != null ? Path.of(devDir) : CefRuntime.prepare(gameDir.resolve("vitrine/cef"));
@@ -92,7 +64,7 @@ public final class VitrineClient implements ClientModInitializer {
 		if (dir == null) return;
 		loaded = null;
 		try {
-			Path cache = Files.createDirectories(FabricLoader.getInstance().getGameDir().resolve("vitrine/cache"));
+			Path cache = Files.createDirectories(gameDir.resolve("vitrine/cache"));
 			if (!Native.init(dir.toString(), cache.toString())) {
 				LOG.error("Vitrine: CEF failed to initialize from {}", dir);
 				return;
@@ -129,14 +101,15 @@ public final class VitrineClient implements ClientModInitializer {
 	/**
 	 * Vitrine's own runClient only (-Dvitrine.demo=true), and an example of the public API: F8 opens/focuses a test page served from vitrine://vitrine/demo.html.
 	 * Java -> JS: player position every half second. JS -> Java: "echo" and "close" handlers.
+	 * {@code register} registers a key mapping with the loader; the result runs at the end of every client tick.
 	 */
-	private static void registerDemo() {
+	static Consumer<Minecraft> demo(UnaryOperator<KeyMapping> register) {
 		//? if >=1.21.9 {
 		var category = KeyMapping.Category.MISC;
 		//?} else
 		/*var category = "key.categories.misc";*/
-		KeyMapping key = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.vitrine.demo", InputConstants.KEY_F8, category));
-		KeyMapping worldKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.vitrine.demo_world", InputConstants.KEY_F9, category));
+		KeyMapping key = register.apply(new KeyMapping("key.vitrine.demo", InputConstants.KEY_F8, category));
+		KeyMapping worldKey = register.apply(new KeyMapping("key.vitrine.demo_world", InputConstants.KEY_F9, category));
 		// -Pgallery: F8/F9 show the Modrinth gallery pages (branding/gallery) instead of the jar's demo, and
 		// control.txt there drives the shoot, one order per line: "focus on|off", "panel", "run <command>", "shot <name>" (into screenshots/).
 		String dir = System.getProperty("vitrine.demoDir");
@@ -181,7 +154,7 @@ public final class VitrineClient implements ClientModInitializer {
 			}
 			demo[0].focus(true);
 		};
-		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+		return mc -> {
 			while (worldKey.consumeClick() && mc.player != null) place.run();
 			while (key.consumeClick()) open.run();
 			Path orders = dir == null ? null : Path.of(dir, "control.txt");
@@ -208,6 +181,6 @@ public final class VitrineClient implements ClientModInitializer {
 				demo[0].send(String.format(java.util.Locale.ROOT,
 						"{\"type\":\"pos\",\"x\":%.1f,\"y\":%.1f,\"z\":%.1f}", p.x, p.y, p.z));
 			}
-		});
+		};
 	}
 }

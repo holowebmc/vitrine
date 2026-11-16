@@ -7,8 +7,11 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 //?} else if >=1.21.9 {
 /*import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 *///?} else {
-/*import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
+/*import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.culling.Frustum;
+import org.joml.Matrix4f;
 *///?}
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
@@ -98,15 +101,15 @@ public final class Pages {
 		for (WorldPanel v : WORLDS) v.submit(ctx.commandQueue(), ctx.matrices());
 	}
 	*///?} else {
-	/*static void renderWorld(WorldRenderContext ctx) {
-		WorldPanel.captureCamera(ctx);
+	/*static void renderWorld(Camera camera, Matrix4f projection, Frustum frustum, PoseStack matrices, MultiBufferSource consumers) {
+		WorldPanel.captureCamera(camera, projection, frustum);
 		//? if >=1.20.5 {
-		var pose = new com.mojang.blaze3d.vertex.PoseStack().last(); // the camera rotation is in the model-view
+		var pose = new PoseStack().last(); // the camera rotation is in the model-view
 		//?} else
-		var pose = ctx.matrixStack().last(); // the camera rotation is in this stack
-		for (WorldPanel v : WORLDS) v.submit(ctx.consumers(), pose);
+		var pose = matrices.last(); // the camera rotation is in this stack
+		for (WorldPanel v : WORLDS) v.submit(consumers, pose);
 		// Draw now, while the level's model-view is set (vanilla may have flushed this type already).
-		if (ctx.consumers() instanceof MultiBufferSource.BufferSource buffers) buffers.endBatch();
+		if (consumers instanceof MultiBufferSource.BufferSource buffers) buffers.endBatch();
 	}
 	*///?}
 
