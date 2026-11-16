@@ -144,7 +144,8 @@ tasks {
             "version" to project.version,
             "minecraft" to project.property("mod.mc_dep"),
             "java" to java.majorVersion,
-            "loader" to project.property(if (neoforge) "deps.neoforge" else "deps.fabric_loader"),
+            // NeoForge: the oldest build the jar accepts (mod.neoforge_dep), not the dev one; players' packs lag behind.
+            "loader" to project.property(if (neoforge) "mod.neoforge_dep" else "deps.fabric_loader"),
             // Version-specific mixins: Vulkan zero-copy only on renderpearl; backdrop blur in the GUI renderer (1.21.6+) or our offscreen target as the main one (before); NativeImage pointer before 1.21.5.
             "extra_mixins" to buildList {
                 if (!preRenderpearl) addAll(listOf("VulkanFeatureSetsMixin", "VulkanCommandEncoderAccessor"))

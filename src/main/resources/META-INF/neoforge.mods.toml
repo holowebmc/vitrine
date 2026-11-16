@@ -15,7 +15,7 @@ config = "vitrine.mixins.json"
 [[dependencies.vitrine]]
 modId = "neoforge"
 type = "required"
-versionRange = "[${loader},)"
+versionRange = "${loader}"
 side = "CLIENT"
 
 [[dependencies.vitrine]]
